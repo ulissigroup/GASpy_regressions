@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 
 #Connect to the local adsorption energy database
-conAds=connect('../manage_DFT_database/adsorption_energy_database.db')
+conAds=connect('../adsorption_energy_database.db')
 
 #Only select adsorption energies that have a consistent set of DFT settings
 xc='beef-vdw'

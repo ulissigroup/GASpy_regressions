@@ -13,8 +13,8 @@ from multiprocessing import Pool
 
 
 #Connect to the local adsorption energy database
-conAds=connect('../manage_DFT_database/adsorption_energy_database.db')
-conEnum=connect('../manage_DFT_database/enumerated_adsorption_sites.db')
+conAds=connect('../adsorption_energy_database.db')
+conEnum=connect('../enumerated_adsorption_sites.db')
 
 #Only select adsorption energies that have a consistent set of DFT settings
 xc='beef-vdw'
