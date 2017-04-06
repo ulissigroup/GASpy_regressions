@@ -4,17 +4,19 @@ import numpy as np
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.linear_model import LinearRegression
 import matplotlib as mpl
+from scipy.sparse import coo_matrix
 
 from matplotlib import rc
 rc('text', usetex=False)
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 from multiprocessing import Pool
+import cPickle as pickle
 
 
 #Connect to the local adsorption energy database
-conAds=connect('../adsorption_energy_database.db')
-conEnum=connect('../enumerated_adsorption_sites.db')
+conAds=connect('../GASpy/adsorption_energy_database.db')
+conEnum=connect('../GASpy/enumerated_adsorption_sites.db')
 
 #Only select adsorption energies that have a consistent set of DFT settings
 xc='beef-vdw'
@@ -43,6 +45,9 @@ lb2=LabelBinarizer()
 lb2.fit(unique_neighborcoord)
 
 
+def sumTransform(x):
+    return np.sum(lb2.transform(x),axis=0)
+
 
 LR_save={}
 for adsorbate in unique_adsorbates:
@@ -65,7 +70,7 @@ for adsorbate in unique_adsorbates:
     
     #Let's try and get the residuals with the coordination of the active site atoms
     secondary_coord=[sorted(eval(row.neighborcoord)) for row in adsorption_rows if row.adsorbate==adsorbate]
-    X2=map(lambda y: np.sum(lb2.transform(y),axis=0),secondary_coord)
+    X2=map(sumTransform,secondary_coord)
     
     LR2=LinearRegression()
     LR2.fit(X2,dE_residual)
@@ -88,16 +93,34 @@ Xenum=lb.transform([row.coordination for row in adsorption_rows_catalog])
 secondary_coord=[sorted(eval(row.neighborcoord)) for row in adsorption_rows_catalog]
 
 
-def sumTransform(x):
-    return np.sum(lb2.transform(x),axis=0)
 
-#pool=Pool(8)
-#X2enum=pool.map(sumTransform,secondary_coord)
-    
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+pool=Pool(16,maxtasksperchild=2)
+
+
 dEprediction={}
 for adsorbate in unique_adsorbates:
-    dEprediction[adsorbate]=LR_save[adsorbate]['primary_LR'].predict(Xenum) #+LR_save[adsorbate]['secondary_LR'].predict(X2enum)
-    dEprediction[adsorbate]=dEprediction[adsorbate]*np.logical_and(dEprediction[adsorbate]>-5,dEprediction[adsorbate]<5)
+    dEprediction[adsorbate]=[]
+
+for chunk in chunks(zip(Xenum,secondary_coord),10000):
+    chunk_Xenum,chunk_secondary_coord=zip(*chunk)
+    X2enum_chunk=coo_matrix(pool.map(sumTransform,chunk_secondary_coord))
+    print('%d/%d'%(len(dEprediction[adsorbate]),len(Xenum)))
+    for adsorbate in unique_adsorbates:
+        temp=LR_save[adsorbate]['primary_LR'].predict(chunk_Xenum)+LR_save[adsorbate]['secondary_LR'].predict(X2enum_chunk)
+        dEprediction[adsorbate]+=list(temp*np.logical_and(temp>-5,temp<5))
+
+pickle.dump(dEprediction,open('primary_coordination_prediction.pkl','w'))
+
+#dEprediction={}
+#for adsorbate in unique_adsorbates:
+#    dEprediction[adsorbate]=LR_save[adsorbate]['primary_LR'].predict(Xenum) 
+#+LR_save[adsorbate]['secondary_LR'].predict(X2enum)
+#    dEprediction[adsorbate]=dEprediction[adsorbate]*np.logical_and(dEprediction[adsorbate]>-5,dEprediction[adsorbate]<5)
     
 plt.figure()
 dE_CO=dEprediction['CO']
@@ -106,7 +129,16 @@ plt.plot(dE_CO,dE_H,'.')
 plt.xlabel('dE CO [eV]')
 plt.ylabel('dE H eV]')
 plt.savefig('enumerated_CO_H_predictions.pdf')
-    
+
+matching=[]
+for dE,row in zip(dEprediction['CO'],adsorption_rows_catalog):
+    if dE>-0.9 and dE<-0.5 and 'Al' not in row.formula and 'Cu' not in row.formula:
+        matching.append([dE,row])
+
+unique_vals=np.unique(map(lambda x: str([x[0],x[1].formula,x[1].miller,x[1].coordination,x[1].top]),matching))
+
+for match in unique_vals:
+    print(match)
     
 
 unique_surfaces=map(eval,np.unique([str([row.mpid,row.miller,row.top,row.shift]) for row in adsorption_rows_catalog]))
