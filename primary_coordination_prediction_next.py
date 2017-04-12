@@ -38,7 +38,7 @@ def subtractCentral(nextcoord,coord):
     
 #Grab all of the possible coordination sites
 adsorption_rows_catalog=[row for row in conEnum.select()]
-adsorption_rows_catalog=[row for row in conAds.select()]
+#adsorption_rows_catalog=[row for row in conAds.select()]
 unique_coordination_catalog=np.unique([row.coordination for row in adsorption_rows_catalog])
 unique_nextcoordination_catalog=np.unique([str([row.coordination,subtractCentral(row.nextnearestcoordination,row.coordination)]) for row in adsorption_rows_catalog])
 
@@ -127,9 +127,9 @@ dEprediction={}
 for adsorbate in unique_adsorbates:
     dEprediction[adsorbate]=[]
 
-for chunk in chunks(zip(Xenum,secondary_coord),10000):
+for chunk in chunks(zip(Xenum,secondary_coord),1000):
     chunk_Xenum,chunk_secondary_coord=zip(*chunk)
-    X2enum_chunk=lb2.transform(chunk_secondary_coord)
+    X2enum_chunk=coo_matrix(lb2.transform(chunk_secondary_coord))
     print('%d/%d'%(len(dEprediction[adsorbate]),len(Xenum)))
     for adsorbate in unique_adsorbates:
         temp=LR_save[adsorbate]['primary_LR'].predict(chunk_Xenum)+LR_save[adsorbate]['secondary_LR'].predict(X2enum_chunk)
