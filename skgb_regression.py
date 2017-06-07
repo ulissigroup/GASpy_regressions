@@ -107,7 +107,6 @@ X = np.hstack(X)
 # Do this for both the training and test set.
 Y_TRAIN = tuple()
 Y_TEST = tuple()
-Y = tuple()
 for response in RESPONSES:
     Y_TRAIN += (DATA['Train']['responses'][response],)
     Y_TEST += (DATA['Test']['responses'][response],)

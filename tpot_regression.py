@@ -6,6 +6,7 @@ from ase.db import connect
 from sklearn.model_selection import train_test_split
 from sklearn import preprocessing
 from tpot import TPOTRegressor
+import matplotlib.pyplot as plt
 from vasp_settings_to_str import vasp_settings_to_str
 
 # Calculation settings we want to look at
@@ -16,9 +17,12 @@ VASP_SETTINGS = vasp_settings_to_str({'gga': 'BF',
 # of the ase-db rows.
 FACTORS = ['coordination', 'adsorbate']
 RESPONSES = ['energy']
+# Location of the *.db file
+DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db'  # Cori
+#DB_LOC = '../adsorption_energy_database.db'                                     # Local
 # TPOT settings
-GEN = 1
-POP = 10
+GEN = 100
+POP = 100
 RAN = 42
 
 # Initialize a DATA dictionary. It will contain a key:value(s) pairing for each data set,
@@ -36,9 +40,11 @@ DATA['Test'] = {'factors': dict.fromkeys(FACTORS, None),
 DATA['Decoders'] = dict.fromkeys(FACTORS+RESPONSES, None)
 
 # Pull the data from the *.db and dump it into our DATA dictionary
-DB = connect('../adsorption_energy_database.db')
+DB = connect(DB_LOC)
 DATA['db_rows'] = [row for row in DB.select()
-                   if all([row[key] == VASP_SETTINGS[key] for key in VASP_SETTINGS])]
+                   if all([row[key] == VASP_SETTINGS[key] for key in VASP_SETTINGS])
+                   and -4 < row.energy < 4
+                   and row.max_surface_movement < 2]
 
 # TPOT and SKLearn require us to pre-process our data. We do that here for each data set.
 for key in FACTORS+RESPONSES:
@@ -93,11 +99,14 @@ for response in RESPONSES:
 # Do this for both the training and test set.
 X_TRAIN = tuple()
 X_TEST = tuple()
+X = tuple()
 for factor in FACTORS:
     X_TRAIN += (DATA['Train']['factors'][factor],)
     X_TEST += (DATA['Test']['factors'][factor],)
+    X += (DATA[factor],)
 X_TRAIN = np.hstack(X_TRAIN)
 X_TEST = np.hstack(X_TEST)
+X = np.hstack(X)
 # Merge all of the factors into one array by combining the data into a tuple, which is then
 # passed to a horizontal stacking function and converted to CSR sparse form.
 # Do this for both the training and test set.
@@ -110,7 +119,29 @@ Y_TRAIN = np.hstack(Y_TRAIN)
 Y_TEST = np.hstack(Y_TEST)
 
 # Use TPOT to create a pipeline
-tpot = TPOTRegressor(generations=GEN, population_size=POP, verbosity=2, random_state=RAN)
-tpot.fit(X_TRAIN, Y_TRAIN)
-print(tpot.score(X_TEST, Y_TEST))
-tpot.export('tpot_pipeline_%s_%s_%s.py' % (GEN, POP, RAN))
+TPOT = TPOTRegressor(generations=GEN, population_size=POP, verbosity=2, random_state=RAN)
+TPOT.fit(X_TRAIN, Y_TRAIN)
+TPOT.export('tpot_pipeline_%s_%s_%s.py' % (GEN, POP, RAN))
+
+# Print score and plot. This part of the code has not yet been tailored to
+# handle multiple repsonses.
+print(TPOT.score(X_TEST, Y_TEST))
+PREDICT = TPOT.predict(X)
+lims = [min(PREDICT+DATA['energy']), max(PREDICT+DATA['energy'])]
+for ads_ind, ads in enumerate(DATA['Decoders']['adsorbate']):
+    actual = []
+    subset = []
+    for data_ind, ads_list in enumerate(DATA['adsorbate'].tolist()):
+        if ads_list.index(1) == ads_ind:
+            subset.append(data_ind)
+            actual.append(DATA['energy'][data_ind])
+    predicted = TPOT.predict(X[subset])
+    plt.scatter(predicted, actual, label=ads)
+plt.xlim(lims)
+plt.ylim(lims)
+plt.xlabel('Predicted (eV)')
+plt.ylabel('Actual (eV)')
+plt.title('Gradient Boosted Regression Fit for Adsorption Energy')
+plt.legend()
+plt.show()
+plt.savefig('Fig_TPOT.pdf')
