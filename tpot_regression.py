@@ -1,5 +1,5 @@
 import sys
-sys.path.append('../..')
+sys.path.append('..')
 from pprint import pprint
 import numpy as np
 from ase.db import connect
@@ -16,6 +16,10 @@ VASP_SETTINGS = vasp_settings_to_str({'gga': 'BF',
 # of the ase-db rows.
 FACTORS = ['coordination', 'adsorbate']
 RESPONSES = ['energy']
+# TPOT settings
+GEN = 1
+POP = 10
+RAN = 42
 
 # Initialize a DATA dictionary. It will contain a key:value(s) pairing for each data set,
 # regardless of whether the data set is a factor or response.
@@ -32,7 +36,7 @@ DATA['Test'] = {'factors': dict.fromkeys(FACTORS, None),
 DATA['Decoders'] = dict.fromkeys(FACTORS+RESPONSES, None)
 
 # Pull the data from the *.db and dump it into our DATA dictionary
-DB = connect('../../adsorption_energy_database.db')
+DB = connect('../adsorption_energy_database.db')
 DATA['db_rows'] = [row for row in DB.select()
                    if all([row[key] == VASP_SETTINGS[key] for key in VASP_SETTINGS])]
 
@@ -106,7 +110,7 @@ Y_TRAIN = np.hstack(Y_TRAIN)
 Y_TEST = np.hstack(Y_TEST)
 
 # Use TPOT to create a pipeline
-tpot = TPOTRegressor(generations=5, population_size=50, verbosity=2)
+tpot = TPOTRegressor(generations=GEN, population_size=POP, verbosity=2, random_state=RAN)
 tpot.fit(X_TRAIN, Y_TRAIN)
 print(tpot.score(X_TEST, Y_TEST))
-tpot.export('reg_pipe.py')
+tpot.export('tpot_pipeline_%s_%s_%s.py' % (GEN, POP, RAN))
