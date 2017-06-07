@@ -6,6 +6,7 @@ from ase.db import connect
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn import preprocessing
+import matplotlib.pyplot as plt
 from vasp_settings_to_str import vasp_settings_to_str
 
 # Calculation settings we want to look at
@@ -32,9 +33,12 @@ DATA['Test'] = {'factors': dict.fromkeys(FACTORS, None),
 DATA['Decoders'] = dict.fromkeys(FACTORS+RESPONSES, None)
 
 # Pull the data from the *.db and dump it into our DATA dictionary
-DB = connect('../adsorption_energy_database.db')
+#DB = connect('../adsorption_energy_database.db')    # Local
+DB = connect('/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db')     # Cori
 DATA['db_rows'] = [row for row in DB.select()
-                   if all([row[key] == VASP_SETTINGS[key] for key in VASP_SETTINGS])]
+                   if all([row[key] == VASP_SETTINGS[key] for key in VASP_SETTINGS])
+                   and -4 < row.energy < 4
+                   and row.max_surface_movement < 2]
 
 # TPOT and SKLearn require us to pre-process our data. We do that here for each data set.
 for key in FACTORS+RESPONSES:
@@ -73,7 +77,8 @@ for response in RESPONSES:
         split_data = train_test_split(DATA[factor],
                                       DATA[response],
                                       train_size=0.75,
-                                      test_size=0.25)
+                                      test_size=0.25,
+                                      random_state=42)
         for i, data in enumerate(split_data):
             if i == 0:
                 DATA['Train']['factors'][factor] = data
@@ -89,23 +94,49 @@ for response in RESPONSES:
 # Do this for both the training and test set.
 X_TRAIN = tuple()
 X_TEST = tuple()
+X = tuple()
 for factor in FACTORS:
     X_TRAIN += (DATA['Train']['factors'][factor],)
     X_TEST += (DATA['Test']['factors'][factor],)
+    X += (DATA[factor],)
 X_TRAIN = np.hstack(X_TRAIN)
 X_TEST = np.hstack(X_TEST)
-# Merge all of the factors into one array by combining the data into a tuple, which is then
+X = np.hstack(X)
+# Merge all of the responses into one array by combining the data into a tuple, which is then
 # passed to a horizontal stacking function and converted to CSR sparse form.
 # Do this for both the training and test set.
 Y_TRAIN = tuple()
 Y_TEST = tuple()
+Y = tuple()
 for response in RESPONSES:
     Y_TRAIN += (DATA['Train']['responses'][response],)
     Y_TEST += (DATA['Test']['responses'][response],)
 Y_TRAIN = np.hstack(Y_TRAIN)
 Y_TEST = np.hstack(Y_TEST)
 
-# Use TPOT to create a pipeline
-GBR = GradientBoostingRegressor()
+# Use SKLearn's GradentBoostingRegressor to create a surrogate model
+GBR = GradientBoostingRegressor(random_state=42)
 GBR.fit(X_TRAIN, Y_TRAIN)
+
+# Print score and plot. This part of the code has not yet been tailored to
+# handle multiple repsonses.
 print(GBR.score(X_TEST, Y_TEST))
+PREDICT = GBR.predict(X)
+lims = [min(PREDICT+DATA['energy']), max(PREDICT+DATA['energy'])]
+for ads_ind, ads in enumerate(DATA['Decoders']['adsorbate']):
+    actual = []
+    subset = []
+    for data_ind, ads_list in enumerate(DATA['adsorbate'].tolist()):
+        if ads_list.index(1) == ads_ind:
+            subset.append(data_ind)
+            actual.append(DATA['energy'][data_ind])
+    predicted = GBR.predict(X[subset])
+    plt.scatter(predicted, actual, label=ads)
+plt.xlim(lims)
+plt.ylim(lims)
+plt.xlabel('Predicted (eV)')
+plt.ylabel('Actual (eV)')
+plt.title('Gradient Boosted Regression Fit for Adsorption Energy')
+plt.legend()
+plt.show()
+plt.savefig('Fig_GBR.pdf')
