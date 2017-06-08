@@ -19,7 +19,7 @@ FACTORS = ['coordination', 'adsorbate']
 RESPONSES = ['energy']
 # Location of the *.db file
 DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db'  # Cori
-#DB_LOC = '../adsorption_energy_database.db'                                     # Local
+#DB_LOC = '/Users/KTran/Nerd/GASpy/adsorption_energy_database.db'                # Local
 # TPOT settings
 GEN = 100
 POP = 100
