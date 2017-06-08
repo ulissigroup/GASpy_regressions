@@ -18,8 +18,8 @@ VASP_SETTINGS = vasp_settings_to_str({'gga': 'BF',
 FACTORS = ['coordination', 'adsorbate']
 RESPONSES = ['energy']
 # Location of the *.db file
-DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db'  # Cori
-#DB_LOC = '../adsorption_energy_database.db'                                     # Local
+#DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db'  # Cori
+DB_LOC = '../adsorption_energy_database.db'                                     # Local
 
 # Initialize a DATA dictionary. It will contain a key:value(s) pairing for each data set,
 # regardless of whether the data set is a factor or response.
@@ -150,5 +150,5 @@ plt.xlabel('Predicted (eV)')
 plt.ylabel('Actual (eV)')
 plt.title('Linear Regression Fit for Adsorption Energy')
 plt.legend()
-plt.show()
 plt.savefig('Fig_LR.pdf')
+plt.show()

@@ -33,8 +33,8 @@ DATA['Test'] = {'factors': dict.fromkeys(FACTORS, None),
 DATA['Decoders'] = dict.fromkeys(FACTORS+RESPONSES, None)
 
 # Pull the data from the *.db and dump it into our DATA dictionary
-#DB = connect('../adsorption_energy_database.db')    # Local
-DB = connect('/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db')     # Cori
+DB = connect('../adsorption_energy_database.db')    # Local
+#DB = connect('/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db')     # Cori
 DATA['db_rows'] = [row for row in DB.select()
                    if all([row[key] == VASP_SETTINGS[key] for key in VASP_SETTINGS])
                    and -4 < row.energy < 4
@@ -137,5 +137,5 @@ plt.xlabel('Predicted (eV)')
 plt.ylabel('Actual (eV)')
 plt.title('Gradient Boosted Regression Fit for Adsorption Energy')
 plt.legend()
-plt.show()
 plt.savefig('Fig_GBR.pdf')
+plt.show()
