@@ -1,13 +1,15 @@
+import numpy as np
 import sys
 sys.path.append('/Users/KTran/Nerd/GASpy')      # Local
-from pprint import pprint
-import numpy as np
-from ase.db import connect
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from sklearn import preprocessing
-from tpot import TPOTRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import MinMaxScaler, LabelBinarizer
+from sklearn.tree import DecisionTreeRegressor
+from tpot.builtins import StackingEstimator
 import matplotlib.pyplot as plt
 from vasp_settings_to_str import vasp_settings_to_str
+from ase.db import connect
 
 # Calculation settings we want to look at
 VASP_SETTINGS = vasp_settings_to_str({'gga': 'BF',
@@ -18,8 +20,8 @@ VASP_SETTINGS = vasp_settings_to_str({'gga': 'BF',
 FACTORS = ['coordination', 'adsorbate']
 RESPONSES = ['energy']
 # Location of the *.db file
-DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db'  # Cori
-#DB_LOC = '/Users/KTran/Nerd/GASpy/adsorption_energy_database.db'                # Local
+#DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/adsorption_energy_database.db'  # Cori
+DB_LOC = '/Users/KTran/Nerd/GASpy/adsorption_energy_database.db'                # Local
 # TPOT settings
 GEN = 100
 POP = 100
@@ -64,7 +66,7 @@ for key in FACTORS+RESPONSES:
         cats, inv = np.unique(data,
                               return_inverse=True)
         # Use the OneHotEncoder to preprocess the categorical data
-        enc = preprocessing.LabelBinarizer()
+        enc = LabelBinarizer()
         enc.fit(cats)
         ppd_data = enc.transform(data)
         # Store the `cats` object in the DATA dictionary for decoding the integers
@@ -118,15 +120,23 @@ for response in RESPONSES:
 Y_TRAIN = np.hstack(Y_TRAIN)
 Y_TEST = np.hstack(Y_TEST)
 
-# Use TPOT to create a pipeline
-TPOT = TPOTRegressor(generations=GEN, population_size=POP, verbosity=2, random_state=RAN)
-TPOT.fit(X_TRAIN, Y_TRAIN)
-TPOT.export('tpot_pipeline_%s_%s_%s.py' % (GEN, POP, RAN))
+# Use the pipeline created by TPOT
+PL = make_pipeline(
+    MinMaxScaler(),
+    StackingEstimator(estimator=RandomForestRegressor(bootstrap=True,
+                                                      max_features=0.65,
+                                                      min_samples_leaf=19,
+                                                      min_samples_split=9,
+                                                      n_estimators=100)),
+    DecisionTreeRegressor(max_depth=3, min_samples_leaf=15, min_samples_split=14)
+)
+PL.fit(X_TRAIN, Y_TRAIN)
+results = PL.predict(X_TEST)
 
 # Print score and plot. This part of the code has not yet been tailored to
 # handle multiple repsonses.
-print(TPOT.score(X_TEST, Y_TEST))
-PREDICT = TPOT.predict(X)
+print(PL.score(X_TEST, Y_TEST))
+PREDICT = PL.predict(X)
 LIMS = [min(PREDICT+DATA['energy']), max(PREDICT+DATA['energy'])]
 for ads_ind, ads in enumerate(DATA['Decoders']['adsorbate']):
     actual = []
@@ -135,13 +145,13 @@ for ads_ind, ads in enumerate(DATA['Decoders']['adsorbate']):
         if ads_list.index(1) == ads_ind:
             subset.append(data_ind)
             actual.append(DATA['energy'][data_ind])
-    predicted = TPOT.predict(X[subset])
+    predicted = PL.predict(X[subset])
     plt.scatter(predicted, actual, label=ads)
 plt.xlim(LIMS)
 plt.ylim(LIMS)
 plt.xlabel('Predicted (eV)')
 plt.ylabel('Actual (eV)')
-plt.title('Gradient Boosted Regression Fit for Adsorption Energy')
+plt.title('TPOT Fit for Adsorption Energy')
 plt.legend()
 plt.show()
 plt.savefig('Fig_TPOT.pdf')
