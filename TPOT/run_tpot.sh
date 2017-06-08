@@ -11,7 +11,7 @@
 
 module load python
 source activate /project/projectdirs/m2755/GASpy_conda/
-cd /global/project/projectdirs/m2755/Kevin/GASpy/GASpy_regressions
+cd /global/project/projectdirs/m2755/Kevin/GASpy/GASpy_regressions/TPOT
 
 python tpot_regression.py
 
