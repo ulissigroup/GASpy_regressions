@@ -30,6 +30,7 @@ GBE = GradientBoostingRegressor()
 GBE.fit(X_TRAIN, Y_TRAIN)
 GBE.name = 'GBE'
 
+# Create a plot for each model
 for model in [LR, GBE]:
     # Create a parity plot where each adsorbate is shown
     for ads in np.unique(DATA['adsorbate']):
