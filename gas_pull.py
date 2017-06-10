@@ -7,6 +7,7 @@ Note that this script uses the term "factors". Some people may call these "featu
 '''
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
+from pprint import pprint   # for debugging
 import sys
 import numpy as np
 from ase.db import connect
@@ -17,7 +18,7 @@ from sklearn.model_selection import train_test_split
 class GASPullByMotifs(object):
     def __init__(self, db_loc, vasp_settings,
                  split=False,
-                 energy_min=-4, energy_max=4, slab_move_max=2,
+                 energy_min=-4, energy_max=4, slab_move_max=1.5, fmax_max=0.5,
                  train_size=0.75, random_state=42):
         '''
         Connect to the database and pull out the pertinent rows.
@@ -30,6 +31,7 @@ class GASPullByMotifs(object):
         energy_min      The minimum adsorption energy to pull from the Local DB (eV)
         energy_max      The maximum adsorption energy to pull from the Local DB (eV)
         slab_move_max   The maximum distance that a slab atom may move (angstrom)
+        fmax_max        The upper limit on the maximum force on an atom in the system
         '''
         # Pass along various parameters to use later
         self.split = split
@@ -38,16 +40,17 @@ class GASPullByMotifs(object):
 
         # Update PYTHONPATH so we can connect to the Local database, and then pull from it
         sys.path.append(db_loc)
-        db = connect(db_loc + '/adsorption_energy_database.db')
+        db = connect(db_loc+'/adsorption_energy_database.db')
         # A list of ase-db rows are stored in self.rows for later use
         self.rows = [row for row in db.select()
                      if all([row[key] == vasp_settings[key] for key in vasp_settings])
-                     and -energy_min < row.energy < energy_max
-                     and row.max_surface_movement < slab_move_max]
+                     and energy_min < row.energy < energy_max
+                     and row.max_surface_movement < slab_move_max
+                     and row.fmax < fmax_max]
+        # If we did not pull anything from the database, then stop the script and alert the user
         if len(self.rows) == 0:
-            print('Could not find any database rows to match input settings. \
-                  Please verify db_loc, vasp_settings, or whether or not the \
-                  database actually has the data you are looking for')
+            print('DATABASE ERROR:  Could not find any database rows to match input settings. Please verify db_loc, vasp_settings, or whether or not the database actually has the data you are looking for.\n')
+            sys.exit()
 
 
     def _pull(self, variables):
@@ -69,7 +72,17 @@ class GASPullByMotifs(object):
 
     def _stack(self, data_dict, keys):
         '''
+        This method stacks various data into a numpy array. It should be used to stack factors
+        and responses (separately).
+        Inputs:
+            data_dict   A dictionary of the data to stack. The keys in this dictionary should
+                        be the names of the data, and the values should be lists of the data
+            keys        `data_dict` may contain key:value pairs that we don't want to stack.
+                        The user must provide a list of the keys of the data they want to stack.
+        Output:  A numpy array where the data are stacked horizontally.
         '''
+        # We will use the numpy.hstack function, which accepts the data in a tuple form. But first,
+        # we initialize the tuple and then populate it with the data from data_dict.
         data_tup = tuple()
         for key in keys:
             data_tup += (data_dict[key],)
@@ -88,31 +101,32 @@ class GASPullByMotifs(object):
         Outputs:
             data        A dictionary containing the data we pulled from the Local database.
                         This object is taken raw from the _pull method.
+            x           A stacked array containing all of the data for all of the factors
+            y           A stacked array containing all of the data for all of the responses
+            x_train     A subset of `x` intended to use as a training set
+            y_train     A subset of `y` intended to use as a training set
+            x_test      A subset of `x` intended to use as a validation set
+            y_test      A subset of `y` intended to use as a validation set
         '''
         # Establish the variables and pull the data from the Local database
         factors = ['coordination', 'adsorbate']
         responses = ['energy']
-        data = self._pull(factors+responses)
-
+        data = self._pull(factors+responses+['symbols'])
         # Initialize a second dictionary, `p_data`, that will be identical to the `data`
         # dictionary, except the values will be pre-processed data, not "raw" data.
         p_data = dict.fromkeys(factors+responses, None)
 
         # Pre-process the energy
         p_data['energy'] = np.array(data['energy'])
-
         # Pre-process the adsorbate identity via binarizer
         ads = np.unique(data['adsorbate'])
-        enc = preprocessing.LabelBinarizer()
-        enc.fit(ads)
-        p_data['adsorbate'] = enc.transform(data)
-
+        lb_ads = preprocessing.LabelBinarizer()
+        lb_ads.fit(ads)
+        p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
         # Pre-process the coordination
-        lb = preprocessing.LabelBinarizer()
-        lb.fit(np.unique([item
-                          for sublist in [row.symbols for row in data['coordination']]
-                          for item in sublist]))
-        p_data['coordination'] = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
+        lb_coord = preprocessing.LabelBinarizer()
+        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist]))
+        p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
                                            for coord in data['coordination']])
 
         # Stack the data to create the outputs
@@ -121,10 +135,10 @@ class GASPullByMotifs(object):
 
         # If specified, return the split data and the raw data
         if self.split:
-            return train_test_split(x, y,
-                                    train_size=self.train_size,
-                                    random_state=self.random_state), data
-
+            x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                train_size=self.train_size,
+                                                                random_state=self.random_state)
+            return x, y, data, x_train, x_test, y_train, y_test
         # If we are not splitting the data, then simply returt x, y, and the raw data
         elif not self.split:
             return x, y, data
