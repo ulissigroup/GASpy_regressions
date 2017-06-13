@@ -47,7 +47,7 @@ for model in [ALA]:
         x = [X[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
         y = [Y[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
         # Do some footwork because Alamo returns a lambda function that doesn't accept np arrays
-        def pred(factors):
+        def model_predict(factors):
             '''
             Turn a vector of input data, `factors`, into the model's guessed output. We use
             this function to do so because lambda functions suck. We should address this by
@@ -57,19 +57,20 @@ for model in [ALA]:
             for j, factor in enumerate(factors):
                 args[j] = factor
             return model['f(model)'](args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14], args[15], args[16], args[17], args[18], args[19], args[20], args[21], args[22], args[23], args[24], args[25])
-        y_predicted = map(pred, x)
+        y_predicted = map(model_predict, x)
         plt.scatter(y_predicted, y, label=ads)
-    # `predict` is the model's prediction of what Y should be
-    predict = map(pred, X)
     # Create a diagonal line for the parity plot
-    lims = [min(predict+DATA['energy']), max(predict+DATA['energy'])]
+    #predict = model.predict(X)
+    #lims = [min(predict+DATA['energy']), max(predict+DATA['energy'])]
+    lims = [-4, 6]
     plt.plot(lims, lims, '--k')
     # Label the plot and save it
     plt.xlabel('Regressed (eV)')
     plt.ylabel('DFT (eV)')
     plt.title('Adsorption Energy as a function of (Coordination Count, Adsorbate)\n\
               Model = %s\n\
-              RMSE = %0.3f eV' % (model['name'], metrics.mean_squared_error(Y, predict)))
+              RMSE = %0.3f eV' \
+              % (model['name'], metrics.mean_squared_error(Y_TEST, map(model_predict, X_TEST))))
     plt.legend()
     plt.savefig('CoordcountAds_%s.pdf' % model['name'], bbox_inches='tight')
     plt.show()
@@ -83,17 +84,18 @@ for model in [LR, GBE]:
         y = [Y[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
         y_predicted = model.predict(x)
         plt.scatter(y_predicted, y, label=ads)
-    # `predict` is the model's prediction of what Y should be
-    predict = model.predict(X)
     # Create a diagonal line for the parity plot
-    lims = [min(predict+DATA['energy']), max(predict+DATA['energy'])]
+    #predict = model.predict(X)
+    #lims = [min(predict+DATA['energy']), max(predict+DATA['energy'])]
+    lims = [-4, 6]
     plt.plot(lims, lims, '--k')
     # Label the plot and save it
     plt.xlabel('Regressed (eV)')
     plt.ylabel('DFT (eV)')
     plt.title('Adsorption Energy as a function of (Coordination Count, Adsorbate)\n\
               Model = %s\n\
-              RMSE = %0.3f eV' % (model.name, metrics.mean_squared_error(Y, predict)))
+              RMSE = %0.3f eV' \
+              % (model.name, metrics.mean_squared_error(Y_TEST, model.predict(X_TEST))))
     plt.legend()
     plt.savefig('CoordcountAds_%s.pdf' % model.name, bbox_inches='tight')
     plt.show()
