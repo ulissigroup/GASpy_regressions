@@ -1,0 +1,7 @@
+ secret maxiphdives: -1
+ deltaTerm 1
+ deltaT 5
+ deltaA 0.1
+ deltaR 0.1
+ AbsIntFeasTol 1e-12
+ RelIntFeasTol 0

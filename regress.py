@@ -1,12 +1,14 @@
 from pprint import pprint   # for debugging
 import sys
-sys.path.append('..')
 import numpy as np
+sys.path.append('..')
 from vasp_settings_to_str import vasp_settings_to_str
 from gas_pull import GASPullByMotifs as GasPull
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
+sys.path.append('/Users/KTran/Dropbox/alamo_python')
+import alamopy
 import matplotlib.pyplot as plt
 
 # Location of the *.db file
@@ -29,17 +31,60 @@ LR.name = 'Linear'
 GBE = GradientBoostingRegressor()
 GBE.fit(X_TRAIN, Y_TRAIN)
 GBE.name = 'GBE'
+# Create a surrogate model using ALAMApy
+ALA = alamopy.doalamo(X_TRAIN, Y_TRAIN.reshape(len(Y_TRAIN), 1),
+                      X_TEST, Y_TEST.reshape(len(Y_TEST), 1),
+                      showalm=1,
+                     )
+ALA['name'] = 'Alamo'
 
-# Create a plot for each model
+# Create a plot for each dictionary-type model
+#for model in []:
+for model in [ALA]:
+    # Create a parity plot where each adsorbate is shown. We do that by pulling out
+    # data for each adsorbate and then plotting them.
+    for ads in np.unique(DATA['adsorbate']):
+        x = [X[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
+        y = [Y[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
+        # Do some footwork because Alamo returns a lambda function that doesn't accept np arrays
+        def pred(factors):
+            '''
+            Turn a vector of input data, `factors`, into the model's guessed output. We use
+            this function to do so because lambda functions suck. We should address this by
+            making alamopy output a better lambda function.
+            '''
+            args = dict.fromkeys(range(0, len(factors)-1), None)
+            for j, factor in enumerate(factors):
+                args[j] = factor
+            return model['f(model)'](args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13], args[14], args[15], args[16], args[17], args[18], args[19], args[20], args[21], args[22], args[23], args[24], args[25])
+        y_predicted = map(pred, x)
+        plt.scatter(y_predicted, y, label=ads)
+    # `predict` is the model's prediction of what Y should be
+    predict = map(pred, X)
+    # Create a diagonal line for the parity plot
+    lims = [min(predict+DATA['energy']), max(predict+DATA['energy'])]
+    plt.plot(lims, lims, '--k')
+    # Label the plot and save it
+    plt.xlabel('Regressed (eV)')
+    plt.ylabel('DFT (eV)')
+    plt.title('Adsorption Energy as a function of (Coordination Count, Adsorbate)\n\
+              Model = %s\n\
+              RMSE = %0.3f eV' % (model['name'], metrics.mean_squared_error(Y, predict)))
+    plt.legend()
+    plt.savefig('CoordcountAds_%s.pdf' % model['name'], bbox_inches='tight')
+    plt.show()
+
+# Create a plot for each SKLearn model
 for model in [LR, GBE]:
-    # Create a parity plot where each adsorbate is shown
+    # Create a parity plot where each adsorbate is shown. We do that by pulling out
+    # data for each adsorbate and then plotting them.
     for ads in np.unique(DATA['adsorbate']):
         x = [X[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
         y = [Y[i] for i, _ads in enumerate(DATA['adsorbate']) if _ads == ads]
         y_predicted = model.predict(x)
         plt.scatter(y_predicted, y, label=ads)
     # `predict` is the model's prediction of what Y should be
-    predict = model.predict(np.vstack((X_TRAIN, X_TEST)))
+    predict = model.predict(X)
     # Create a diagonal line for the parity plot
     lims = [min(predict+DATA['energy']), max(predict+DATA['energy'])]
     plt.plot(lims, lims, '--k')

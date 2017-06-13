@@ -1,4 +1,7 @@
 *.py~
 *.pyc
 *.swp
+*.alm
+*.lst
+*.trc
 .DS_Store

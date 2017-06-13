@@ -125,7 +125,12 @@ class GASPullByMotifs(object):
         p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
         # Pre-process the coordination
         lb_coord = preprocessing.LabelBinarizer()
-        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist]))
+        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
+                                if item != 'C' and item != 'O']))
+                                # We filter out C & O because Alamo cries if we include
+                                # symbols that do not actually end up as part of the
+                                # coordination. We can put these back in if we start dealing
+                                # with carbides or oxides, respectively.
         p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
                                            for coord in data['coordination']])
 

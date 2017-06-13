@@ -1,0 +1,69 @@
+--- Job surrogate Start 06/13/17 12:01:38 24.7.4 r58773 DEX-DEG x86 64bit/MacOS X
+GAMS 24.7.4   Copyright (C) 1987-2016 GAMS Development. All rights reserved
+Licensee: Nikolaos Sahinidis, Single User License        G161230/0001AB-GEN
+          Carnegie Mellon University, Dept of Chemical Engineering.  DC8887
+          License for teaching and research at degree granting institutions
+--- Starting compilation
+--- surrogate.gms(31234) 5 Mb
+--- Starting execution: elapsed 0:00:00.153
+--- surrogate.gms(31224) 6 Mb
+--- Generating MIQCP model ssemip
+--- surrogate.gms(31225) 8 Mb
+---   55 rows  55 columns  163 non-zeroes
+---   9,290 nl-code  27 nl-non-zeroes
+---   27 discrete-columns
+--- surrogate.gms(31225) 6 Mb
+--- Executing BARON: elapsed 0:00:00.307
+
+GAMS/BARON       24.7.4 r58773 Released Sep 19, 2016 DEG x86 64bit/MacOS X    
+
+--- Using Option File
+Reading parameter(s) from "/Users/KTran/Nerd/GASpy/GASpy_regressions/almscr/baron.opt"
+>>   secret maxiphdives: -1
+>>   deltaTerm 1
+>>   deltaT 5
+>>   deltaA 0.1
+>>   deltaR 0.1
+>>   AbsIntFeasTol 1e-12
+>>   RelIntFeasTol 0
+Finished reading from "/Users/KTran/Nerd/GASpy/GASpy_regressions/almscr/baron.opt"
+===========================================================================
+ BARON version 16.8.24. Built: OSX-64 Wed Aug 24 09:08:46 EDT 2016
+
+ If you use this software, please cite:
+ Tawarmalani, M. and N. V. Sahinidis, A polyhedral
+ branch-and-cut approach to global optimization,
+ Mathematical Programming, 103(2), 225-249, 2005.
+
+ BARON is a product of The Optimization Firm, LLC. http://www.minlp.com/
+ Parts of the BARON software were created at the
+ University of Illinois at Urbana-Champaign.
+===========================================================================
+ This BARON run may utilize the following subsolver(s)
+ For LP/MIP: ILOG CPLEX                                      
+ For NLP: MINOS, SNOPT, GAMS external NLP, IPOPT, FILTERSD
+===========================================================================
+ Starting solution is feasible with a value of     487380.589208     
+ Preprocessing found feasible solution with value  4231.87606289     
+ Doing local search
+ Solving bounding LP
+ Starting multi-start local search
+ Done with local search
+===========================================================================
+  Iteration    Open nodes         Time (s)    Lower bound      Upper bound
+---  The best solution found is:
+
+Solution      = 4231.87606289  best solution found during preprocessing
+Best possible = -1E51
+Absolute gap  = 1E51  optca = 0.0500000007450581
+Relative gap  = NA  optcr = 9.99999974737875E-5
+  (Note that BARON uses a different formula to compute the relative gap as
+   was used for the above reported value.)
+
+--- Restarting execution
+--- surrogate.gms(31225) 2 Mb
+--- Reading solution for model ssemip
+--- surrogate.gms(31234) 3 Mb
+--- Putfile res /Users/KTran/Nerd/GASpy/GASpy_regressions/almscr/res.put
+*** Status: Normal completion
+--- Job surrogate.gms Stop 06/13/17 12:01:39 elapsed 0:00:01.080
