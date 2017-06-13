@@ -7,7 +7,6 @@ from gas_pull import GASPullByMotifs as GasPull
 from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
-sys.path.append('/Users/KTran/Dropbox/alamo_python')
 import alamopy
 import matplotlib.pyplot as plt
 
