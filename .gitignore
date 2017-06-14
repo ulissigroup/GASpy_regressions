@@ -4,4 +4,8 @@
 *.alm
 *.lst
 *.trc
+*.error
+*.out
+*.pkl
+*.log
 .DS_Store
