@@ -8,11 +8,13 @@ from sklearn import metrics
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
 import alamopy
+import dill as pickle
+pickle.settings['recurse'] = True     # required to pickle lambdify functions
 import matplotlib.pyplot as plt
 
 # Location of the *.db file
-#DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/'  # Cori
-DB_LOC = '/Users/KTran/Nerd/GASpy'                 # Local
+DB_LOC = '/global/cscratch1/sd/zulissi/GASpy_DB/'  # Cori
+#DB_LOC = '/Users/KTran/Nerd/GASpy'                 # Local
 # Calculation settings we want to look at
 VASP_SETTINGS = vasp_settings_to_str({'gga': 'BF',
                                       'pp_version': '5.4.',
@@ -30,12 +32,18 @@ LR.name = 'Linear'
 GBE = GradientBoostingRegressor()
 GBE.fit(X_TRAIN, Y_TRAIN)
 GBE.name = 'GBE'
-# Create a surrogate model using ALAMApy
-ALA = alamopy.doalamo(X_TRAIN, Y_TRAIN.reshape(len(Y_TRAIN), 1),
-                      X_TEST, Y_TEST.reshape(len(Y_TEST), 1),
-                      showalm=1,
-                     )
-ALA['name'] = 'Alamo'
+# Create a surrogate model using ALAMApy.
+# Since Alamo can take awhile, we actually try to load a pickle of the previous run
+# before calling alamopy. Simply delete the pickle if you want to re-run.
+try:
+    ALA = pickle.load(open('alamodel.pkl', 'r'))
+except IOError:
+    ALA = alamopy.doalamo(X_TRAIN, Y_TRAIN.reshape(len(Y_TRAIN), 1),
+                          X_TEST, Y_TEST.reshape(len(Y_TEST), 1),
+                          showalm=1,
+                         )
+    ALA['name'] = 'Alamo'
+    pickle.dump(ALA, open('alamodel.pkl', 'w'), protocol=2)
 
 # Create a plot for each dictionary-type model
 #for model in []:
@@ -72,8 +80,9 @@ for model in [ALA]:
               % (model['name'], metrics.mean_squared_error(Y_TEST, map(model_predict, X_TEST))))
     plt.legend()
     plt.savefig('CoordcountAds_%s.pdf' % model['name'], bbox_inches='tight')
-    plt.show()
+    #plt.show()
 
+sys.exit('Stop after Alamo is done')
 # Create a plot for each SKLearn model
 for model in [LR, GBE]:
     # Create a parity plot where each adsorbate is shown. We do that by pulling out
@@ -97,4 +106,4 @@ for model in [LR, GBE]:
               % (model.name, metrics.mean_squared_error(Y_TEST, model.predict(X_TEST))))
     plt.legend()
     plt.savefig('CoordcountAds_%s.pdf' % model.name, bbox_inches='tight')
-    plt.show()
+    #plt.show()
