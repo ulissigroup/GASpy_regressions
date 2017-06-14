@@ -41,9 +41,20 @@ except IOError:
     ALA = alamopy.doalamo(X_TRAIN, Y_TRAIN.reshape(len(Y_TRAIN), 1),
                           X_TEST, Y_TEST.reshape(len(Y_TEST), 1),
                           showalm=1,
+                          linfcn=1,
+                          expfcn=1,
+                          logfcn=1,
+                          # Can have as many monomial powers as there are factors
+                          monomialpower=tuple(range(0, X.shape[1])),
+                          # Can have binomial powers up to # adsorbates * number of coordcounts
+                          multi2power=tuple(range(0, (X.shape[1]-4)*4)),
+                          # Do the same for ratios as we did for binomials
+                          ratiopower=tuple(range(0, (X.shape[1]-4)*4))
                          )
     ALA['name'] = 'Alamo'
     pickle.dump(ALA, open('alamodel.pkl', 'w'), protocol=2)
+
+sys.exit('Stop after Alamo is done')
 
 # Create a plot for each dictionary-type model
 #for model in []:
@@ -82,7 +93,6 @@ for model in [ALA]:
     plt.savefig('CoordcountAds_%s.pdf' % model['name'], bbox_inches='tight')
     #plt.show()
 
-sys.exit('Stop after Alamo is done')
 # Create a plot for each SKLearn model
 for model in [LR, GBE]:
     # Create a parity plot where each adsorbate is shown. We do that by pulling out
