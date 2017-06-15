@@ -44,12 +44,9 @@ except IOError:
                           linfcn=1,
                           expfcn=1,
                           logfcn=1,
-                          # Can have as many monomial powers as there are factors
-                          monomialpower=tuple(range(0, X.shape[1])),
-                          # Can have binomial powers up to # adsorbates * number of coordcounts
-                          multi2power=tuple(range(0, (X.shape[1]-4)*4)),
-                          # Do the same for ratios as we did for binomials
-                          ratiopower=tuple(range(0, (X.shape[1]-4)*4))
+                          monomialpower=[1, 2, 3],
+                          multi2power=[1, 2, 3],
+                          ratiopower=[1, 2, 3]
                          )
     ALA['name'] = 'Alamo'
     pickle.dump(ALA, open('alamodel.pkl', 'w'), protocol=2)
