@@ -8,4 +8,5 @@
 *.out
 *.pkl
 *.log
+.ipynb_checkpoints
 .DS_Store
