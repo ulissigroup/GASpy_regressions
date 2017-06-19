@@ -142,7 +142,7 @@ class GASPullByMotifs(object):
             x_train, x_test, y_train, y_test = train_test_split(x, y,
                                                                 train_size=self.train_size,
                                                                 random_state=self.random_state)
-            return x, y, data, x_train, x_test, y_train, y_test
+            return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
         # If we are not splitting the data, then simply returt x, y, and the raw data
         elif not self.split:
-            return x, y, data
+            return x, y, data, lb_ads, lb_coord
