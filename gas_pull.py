@@ -49,8 +49,7 @@ class GASPullByMotifs(object):
                      and row.fmax < fmax_max]
         # If we did not pull anything from the database, then stop the script and alert the user
         if len(self.rows) == 0:
-            print('DATABASE ERROR:  Could not find any database rows to match input settings. Please verify db_loc, vasp_settings, or whether or not the database actually has the data you are looking for.\n')
-            sys.exit()
+            raise Exception('DATABASE ERROR:  Could not find any database rows to match input settings. Please verify db_loc, vasp_settings, or whether or not the database actually has the data you are looking for.')
 
 
     def _pull(self, variables):
