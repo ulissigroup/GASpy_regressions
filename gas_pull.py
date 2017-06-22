@@ -7,7 +7,7 @@ Note that this script uses the term "factors". Some people may call these "featu
 '''
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
-from pprint import pprint   # for debugging
+import pdb
 import sys
 import numpy as np
 from ase.db import connect
