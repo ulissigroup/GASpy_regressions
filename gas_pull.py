@@ -106,6 +106,8 @@ class GASPullByMotifs(object):
             y_train     A subset of `y` intended to use as a training set
             x_test      A subset of `x` intended to use as a validation set
             y_test      A subset of `y` intended to use as a validation set
+            lb_ads      The label binarizer used to binarize the adsorbate
+            lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Establish the variables and pull the data from the Local database
         factors = ['coordination', 'adsorbate']
