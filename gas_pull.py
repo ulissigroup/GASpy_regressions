@@ -88,7 +88,7 @@ class GASPullByMotifs(object):
         return np.hstack(data_tup)
 
 
-    def coordcount_ads_to_energy(self):
+    def energy_fr_coordcount_ads(self):
         '''
         Pull data according to the following motifs:
             coord_count     A vector of ordered integers. Each integer represents the number
