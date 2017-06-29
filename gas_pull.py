@@ -15,6 +15,7 @@ from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 
 
+# TODO:  Add ads_move_max whenever we get a chance to reset the Local DB
 class GASPullByMotifs(object):
     def __init__(self, db_loc, vasp_settings,
                  split=False,
@@ -40,16 +41,16 @@ class GASPullByMotifs(object):
 
         # Update PYTHONPATH so we can connect to the Local database, and then pull from it
         sys.path.append(db_loc)
-        db = connect(db_loc+'/adsorption_energy_database.db')
-        # A list of ase-db rows are stored in self.rows for later use
-        self.rows = [row for row in db.select()
-                     if all([row[key] == vasp_settings[key] for key in vasp_settings])
-                     and energy_min < row.energy < energy_max
-                     and row.max_surface_movement < slab_move_max
-                     and row.fmax < fmax_max]
-        # If we did not pull anything from the database, then stop the script and alert the user
-        if len(self.rows) == 0:
-            raise Exception('DATABASE ERROR:  Could not find any database rows to match input settings. Please verify db_loc, vasp_settings, or whether or not the database actually has the data you are looking for.')
+        with connect(db_loc+'/adsorption_energy_database.db') as db:
+            # A list of ase-db rows are stored in self.rows for later use
+            self.rows = [row for row in db.select()
+                         if all([row[key] == vasp_settings[key] for key in vasp_settings])
+                         and energy_min < row.energy < energy_max
+                         and row.max_surface_movement < slab_move_max
+                         and row.fmax < fmax_max]
+            # If we did not pull anything from the database, then stop the script and alert the user
+            if len(self.rows) == 0:
+                raise Exception('DATABASE ERROR:  Could not find any database rows to match input settings. Please verify db_loc, vasp_settings, or whether or not the database actually has the data you are looking for.')
 
 
     def _pull(self, variables):
