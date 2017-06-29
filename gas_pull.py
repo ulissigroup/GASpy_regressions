@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 
 
 # TODO:  Add ads_move_max whenever we get a chance to reset the Local DB
-class GASPullByMotifs(object):
+class GASPull(object):
     def __init__(self, db_loc, vasp_settings,
                  split=False,
                  energy_min=-4, energy_max=4, slab_move_max=1.5, fmax_max=0.5,
@@ -147,5 +147,5 @@ class GASPullByMotifs(object):
                                                                 random_state=self.random_state)
             return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
         # If we are not splitting the data, then simply returt x, y, and the raw data
-        elif not self.split:
+        else:
             return x, y, data, lb_ads, lb_coord
