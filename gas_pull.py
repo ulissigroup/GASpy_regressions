@@ -8,7 +8,6 @@ Note that this script uses the term "factors". Some people may call these "featu
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 import pdb
-import sys
 import numpy as np
 from ase.db import connect
 from sklearn import preprocessing
@@ -40,7 +39,6 @@ class GASPull(object):
         self.random_state = random_state
 
         # Update PYTHONPATH so we can connect to the Local database, and then pull from it
-        sys.path.append(db_loc)
         with connect(db_loc+'/adsorption_energy_database.db') as db:
             # A list of ase-db rows are stored in self.rows for later use
             self.rows = [row for row in db.select()
