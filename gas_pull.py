@@ -18,7 +18,7 @@ from sklearn.model_selection import train_test_split
 class GASPull(object):
     def __init__(self, db_loc, vasp_settings,
                  split=False,
-                 energy_min=-4, energy_max=4, slab_move_max=1.5, fmax_max=0.5,
+                 energy_min=-4, energy_max=4, slab_move_max=1.5, ads_move_max=1.5, fmax_max=0.5,
                  train_size=0.75, random_state=42):
         '''
         Connect to the database and pull out the pertinent rows.
@@ -30,6 +30,7 @@ class GASPull(object):
                         test sets
         energy_min      The minimum adsorption energy to pull from the Local DB (eV)
         energy_max      The maximum adsorption energy to pull from the Local DB (eV)
+        ads_move_max    The maximum distance that an adsorbate atom may move (angstrom)
         slab_move_max   The maximum distance that a slab atom may move (angstrom)
         fmax_max        The upper limit on the maximum force on an atom in the system
         '''
@@ -45,6 +46,7 @@ class GASPull(object):
                          if all([row[key] == vasp_settings[key] for key in vasp_settings])
                          and energy_min < row.energy < energy_max
                          and row.max_surface_movement < slab_move_max
+                         and row.max_adsorbate_movement < ads_move_max
                          and row.fmax < fmax_max]
             # If we did not pull anything from the database, then stop the script and alert the user
             if len(self.rows) == 0:
@@ -95,6 +97,71 @@ class GASPull(object):
                             For example:  a coordination site of Au-Ag-Ag could be represented
                             by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
                             counts for other elements (e.g., Al or Pt).
+            ads             A vector of binaries that indicate the type of adsorbate.
+        Outputs:
+            data        A dictionary containing the data we pulled from the Local database.
+                        This object is taken raw from the _pull method.
+            x           A stacked array containing all of the data for all of the factors
+            y           A stacked array containing all of the data for all of the responses
+            x_train     A subset of `x` intended to use as a training set
+            y_train     A subset of `y` intended to use as a training set
+            x_test      A subset of `x` intended to use as a validation set
+            y_test      A subset of `y` intended to use as a validation set
+            lb_ads      The label binarizer used to binarize the adsorbate
+            lb_coord    The label binarizer used to binarize the coordination vector
+        '''
+        # Establish the variables and pull the data from the Local database
+        factors = ['coordination', 'adsorbate']
+        responses = ['energy']
+        data = self._pull(factors+responses+['symbols'])
+        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
+        # dictionary, except the values will be pre-processed data, not "raw" data.
+        p_data = dict.fromkeys(factors+responses, None)
+
+        # Pre-process the energy
+        p_data['energy'] = np.array(data['energy'])
+        # Pre-process the adsorbate identity via binarizer
+        ads = np.unique(data['adsorbate'])
+        lb_ads = preprocessing.LabelBinarizer()
+        lb_ads.fit(ads)
+        p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
+        # Pre-process the coordination
+        lb_coord = preprocessing.LabelBinarizer()
+        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
+                                if item != 'C' and item != 'O']))
+                                # We filter out C & O because Alamo cries if we include
+                                # symbols that do not actually end up as part of the
+                                # coordination. We can put these back in if we start dealing
+                                # with carbides or oxides, respectively.
+        p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
+                                           for coord in data['coordination']])
+
+        # Stack the data to create the outputs
+        x = self._stack(p_data, factors)
+        y = self._stack(p_data, responses)
+
+        # If specified, return the split data and the raw data
+        if self.split:
+            x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                train_size=self.train_size,
+                                                                random_state=self.random_state)
+            return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
+        # If we are not splitting the data, then simply returt x, y, and the raw data
+        else:
+            return x, y, data, lb_ads, lb_coord
+
+
+    def energy_fr_coordcount_neighborcount_ads(self):
+        '''
+        Pull data according to the following motifs:
+            coord_count     A vector of ordered integers. Each integer represents the number
+                            of atoms of an element that are coordinated with the adsorbate.
+                            For example:  a coordination site of Au-Ag-Ag could be represented
+                            by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
+                            counts for other elements (e.g., Al or Pt).
+            neighbor_count  The same as coord_count, except we cound the atoms that are
+                            coordinated with the binding atoms' neighbors (i.e., the total
+                            coordination of the coordinated atoms).
             ads             A vector of binaries that indicate the type of adsorbate.
         Outputs:
             data        A dictionary containing the data we pulled from the Local database.
