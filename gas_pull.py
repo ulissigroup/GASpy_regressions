@@ -14,7 +14,6 @@ from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 
 
-# TODO:  Add ads_move_max whenever we get a chance to reset the Local DB
 class GASPull(object):
     def __init__(self, db_loc, vasp_settings,
                  split=False,
@@ -176,7 +175,7 @@ class GASPull(object):
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Establish the variables and pull the data from the Local database
-        factors = ['coordination', 'adsorbate']
+        factors = ['coordination', 'nextnearestcoordination', 'adsorbate']
         responses = ['energy']
         data = self._pull(factors+responses+['symbols'])
         # Initialize a second dictionary, `p_data`, that will be identical to the `data`
@@ -190,7 +189,7 @@ class GASPull(object):
         lb_ads = preprocessing.LabelBinarizer()
         lb_ads.fit(ads)
         p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
-        # Pre-process the coordination
+        # Pre-process the coordination counts
         lb_coord = preprocessing.LabelBinarizer()
         lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
                                 if item != 'C' and item != 'O']))
@@ -200,6 +199,11 @@ class GASPull(object):
                                 # with carbides or oxides, respectively.
         p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
                                            for coord in data['coordination']])
+        # Pre-process the secondary coordination counts. Note that we use the same binarizer
+        # that we used for coordination.
+        p_data['nextnearestcoordination'] = \
+                np.array([np.sum(lb_coord.transform(ncoord.split('-')), axis=0)
+                          for ncoord in data['nextnearestcoordination']])
 
         # Stack the data to create the outputs
         x = self._stack(p_data, factors)
