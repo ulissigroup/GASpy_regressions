@@ -11,3 +11,4 @@
 .ipynb_checkpoints
 .DS_Store
 regress.py
+*.xlsx
