@@ -9,9 +9,14 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 import pdb
 import numpy as np
+import pickle
 from ase.db import connect
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
+from pymatgen.io.ase import AseAtomsAdaptor
+from pymatgen.analysis.structure_analyzer import VoronoiCoordFinder
+from vasp.mongo import mongo_doc_atoms
+from gaspy import utils
 
 
 class GASPull(object):
@@ -218,3 +223,114 @@ class GASPull(object):
         # If we are not splitting the data, then simply returt x, y, and the raw data
         else:
             return x, y, data, lb_ads, lb_coord
+
+
+    def energy_fr_gcn_ads(self):
+        # TODO:  Find a way to determine robustly the true maximal coordination
+        # of each atom, instead of assuming that each element in the bulk has the
+        # same maximal coordination.
+        '''
+        Pull data according to the following motifs:
+            gcn     Generalized Coordination Number for an adsorbate on an alloy.
+                    Specifically, it is a horizontally-stacked, ordered, 2-D array of
+                    integers. The i'th vector in the array represents the cumulative
+                    coordination of all i-element atoms that are coordinated with
+                    the adsorbate directly. Each j'th element in each vector
+                    represents the cumulative coordination of each j'th neareast-
+                    neighbor that is also coordinated with an i'th neighbor.
+                    ...I'll write it down in better detail later, and probably
+                    somewhere else.
+            ads     A vector of binaries that indicate the type of adsorbate.
+        Outputs:
+            data        A dictionary containing the data we pulled from the Local database.
+                        This object is taken raw from the _pull method.
+            x           A stacked array containing all of the data for all of the factors
+            y           A stacked array containing all of the data for all of the responses
+            x_train     A subset of `x` intended to use as a training set
+            y_train     A subset of `y` intended to use as a training set
+            x_test      A subset of `x` intended to use as a validation set
+            y_test      A subset of `y` intended to use as a validation set
+            lb_ads      The label binarizer used to binarize the adsorbate
+            lb_coord    The label binarizer used to binarize the coordination vector
+        '''
+        # Establish the variables and pull the data from the Local database
+        pulled_factors = ['coordination', 'nextnearestcoordination', 'bulkfwid',
+                          'adsorbate']
+        factors = ['gcn', 'adsorbate']
+        responses = ['energy']
+        data = self._pull(pulled_factors+responses+['symbols'])
+        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
+        # dictionary, except the values will be pre-processed data, not "raw" data.
+        p_data = dict.fromkeys(factors+responses, None)
+
+        # Pre-process the energy
+        p_data['energy'] = np.array(data['energy'])
+        # Pre-process the adsorbate identity via binarizer
+        ads = np.unique(data['adsorbate'])
+        lb_ads = preprocessing.LabelBinarizer()
+        lb_ads.fit(ads)
+        p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
+
+        # Create a binarizer for the elements we are looking at so that we can use
+        # it to calculate the GCNs
+        lb_coord = preprocessing.LabelBinarizer()
+        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
+                                if item != 'C' and item != 'O']))
+                                # We filter out C & O because Alamo cries if we include
+                                # symbols that do not actually end up as part of the
+                                # coordination. We can put these back in if we start dealing
+                                # with carbides or oxides, respectively.
+        # Determine the maximum coordination of each of the elements in the bulk, c_max.
+        # This will also be used to calculate the GCNs
+        try:
+            with open('./pkls/cmax.pkl', 'rb') as fname:
+                cmax = pickle.load(fname)
+        except IOError:
+            with utils.get_aux_db() as aux_db:
+                bulks = {fwid: mongo_doc_atoms(aux_db.find({'fwid': fwid})[0])
+                         for fwid in np.unique(data['bulkfwid'])}
+            cmax = dict.fromkeys(bulks)
+            for fwid, bulk in bulks.iteritems():
+                struct = AseAtomsAdaptor.get_structure(bulk)
+                vcf = VoronoiCoordFinder(struct, allow_pathological=True)
+                bulk_symbols = np.unique(bulk.get_chemical_symbols())
+                counts = dict.fromkeys(bulk_symbols, [])
+                for i, atom in enumerate(bulk):
+                    try:
+                        neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
+                        neighbor_atoms = [neighbor_site.species_string
+                                          for neighbor_site in neighbor_sites]
+                        counts[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms),
+                                                          axis=0))
+                    except Exception as ex:
+                        template = 'An exception of type {0} occurred. Arguments:\n{1!r}'
+                        message = template.format(type(ex).__name__, ex.args)
+                        print(message)
+                        print('We might have gotten a Qhull error at fwid=%s, atom #%s (%s)' \
+                              % (fwid, i, atom.symbol))
+                        counts[atom.symbol].append([0]*len(lb_coord.transform([''])))
+                cmax[fwid] = {symbol: np.maximum.reduce(count)
+                              for symbol, count in counts.iteritems()}
+            with open('./pkls/cmax.pkl', 'wb') as fname:
+                pickle.dump(cmax, fname)
+
+        ## Pre-process the GCNs.
+        #p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
+                                           #for coord in data['coordination']])
+        #p_data['nextnearestcoordination'] = \
+                #np.array([np.sum(lb_coord.transform(ncoord.split('-')), axis=0)
+                          #for ncoord in data['nextnearestcoordination']])
+#
+        ## Stack the data to create the outputs
+        #x = self._stack(p_data, factors)
+        #y = self._stack(p_data, responses)
+#
+        ## If specified, return the split data and the raw data
+        #if self.split:
+            #x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                #train_size=self.train_size,
+                                                                #random_state=self.random_state)
+            #return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
+        ## If we are not splitting the data, then simply returt x, y, and the raw data
+        #else:
+            #return x, y, data, lb_ads, lb_coord
