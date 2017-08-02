@@ -8,8 +8,8 @@ Note that this script uses the term "factors". Some people may call these "featu
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 import pdb
-import numpy as np
 import pickle
+import numpy as np
 from ase.db import connect
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
@@ -93,6 +93,39 @@ class GASPull(object):
         return np.hstack(data_tup)
 
 
+    def _coord2coordcount(self, coords):
+        '''
+        Turn a human-readable string coordination into a vector of
+        coordination count.
+
+        Inputs:
+            coords      A list of strings indicating the coordination, e.g.,
+                        ['Ag-Au-Au', 'Au']
+        Outputs:
+            coordcounts A numpy array of coordination counts, e.g.,
+                        np.array([1 2 0 0 0], [0 1 0 0 0])
+        '''
+        # Get ALL of the symbols for the elements that we have in the entire DB
+        symbols = self._pull(['symbols'])['symbols']
+
+        # Make a binarizer out of all the symbols.
+        # We filter out C & O because Alamo cries if we include
+        # symbols that do not actually end up as part of the
+        # coordination. We can put these back in if we start dealing
+        # with carbides or oxides, respectively.
+        lb = preprocessing.LabelBinarizer()
+        lb.fit(np.unique([item for sublist in symbols for item in sublist
+                          if item != 'C' and item != 'O']))
+
+        # Use the binarizer to turn a coordination into a list of sparse
+        # binary vectors. For example: We could turn `Ag-Au-Au` into
+        # [[1 0 0 0 0], [0 1 0 0 0], [0 1 0 0 0]]. We then use np.sum
+        # to summate each list into a count list, [1 2 0 0 0]
+        coordcount = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
+                               for coord in coords])
+        return coordcount
+
+
     def energy_fr_coordcount_ads(self):
         '''
         Pull data according to the following motifs:
@@ -130,15 +163,7 @@ class GASPull(object):
         lb_ads.fit(ads)
         p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
         # Pre-process the coordination
-        lb_coord = preprocessing.LabelBinarizer()
-        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
-                                if item != 'C' and item != 'O']))
-                                # We filter out C & O because Alamo cries if we include
-                                # symbols that do not actually end up as part of the
-                                # coordination. We can put these back in if we start dealing
-                                # with carbides or oxides, respectively.
-        p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
-                                           for coord in data['coordination']])
+        p_data['coordination'] = self._coord2coordcount(data['coordination'])
 
         # Stack the data to create the outputs
         x = self._stack(p_data, factors)
@@ -155,7 +180,7 @@ class GASPull(object):
             return x, y, data, lb_ads, lb_coord
 
 
-    def energy_fr_coordcount_neighborcount_ads(self):
+    def energy_fr_coordcount_nncoord_ads(self):
         '''
         Pull data according to the following motifs:
             coord_count     A vector of ordered integers. Each integer represents the number
@@ -163,9 +188,8 @@ class GASPull(object):
                             For example:  a coordination site of Au-Ag-Ag could be represented
                             by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
                             counts for other elements (e.g., Al or Pt).
-            neighbor_count  The same as coord_count, except we cound the atoms that are
-                            coordinated with the binding atoms' neighbors (i.e., the total
-                            coordination of the coordinated atoms).
+            nncord          The same as coord_count, except we cound the atoms that are
+                            coordinated with the binding atoms' nearest neighbor
             ads             A vector of binaries that indicate the type of adsorbate.
         Outputs:
             data        A dictionary containing the data we pulled from the Local database.
@@ -195,20 +219,9 @@ class GASPull(object):
         lb_ads.fit(ads)
         p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
         # Pre-process the coordination counts
-        lb_coord = preprocessing.LabelBinarizer()
-        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
-                                if item != 'C' and item != 'O']))
-                                # We filter out C & O because Alamo cries if we include
-                                # symbols that do not actually end up as part of the
-                                # coordination. We can put these back in if we start dealing
-                                # with carbides or oxides, respectively.
-        p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
-                                           for coord in data['coordination']])
-        # Pre-process the secondary coordination counts. Note that we use the same binarizer
-        # that we used for coordination.
-        p_data['nextnearestcoordination'] = \
-                np.array([np.sum(lb_coord.transform(ncoord.split('-')), axis=0)
-                          for ncoord in data['nextnearestcoordination']])
+        p_data['coordination'] = self._coord2coordcount(data['coordination'])
+        # Pre-process the next nearest coordination counts
+        p_data['nextnearestcoordination'] = self._coord2coordcount(data['nextnearestcoordination'])
 
         # Stack the data to create the outputs
         x = self._stack(p_data, factors)
@@ -226,20 +239,29 @@ class GASPull(object):
 
 
     def energy_fr_gcn_ads(self):
-        # TODO:  Find a way to determine robustly the true maximal coordination
-        # of each atom, instead of assuming that each element in the bulk has the
-        # same maximal coordination.
         '''
         Pull data according to the following motifs:
             gcn     Generalized Coordination Number for an adsorbate on an alloy.
-                    Specifically, it is a horizontally-stacked, ordered, 2-D array of
-                    integers. The i'th vector in the array represents the cumulative
-                    coordination of all i-element atoms that are coordinated with
-                    the adsorbate directly. Each j'th element in each vector
-                    represents the cumulative coordination of each j'th neareast-
-                    neighbor that is also coordinated with an i'th neighbor.
-                    ...I'll write it down in better detail later, and probably
-                    somewhere else.
+                    It is similar to the coordination count, but instead of simply
+                    adding `1` for each neighbor, we add the fractional coordination
+                    for that neighbor (i.e., if that neighbor normally has a CN of 12
+                    and now it has a CN of 6, we assign its fractional coordination as
+                    6/12=0.5). Note that this method has two shortfalls:
+                        1) The fractional coordination of the neighbors is insensitive
+                           to the identity of the missing next-neighbors,
+                           e.g., if a bulk Ag slab atom is normally coordinated
+                           as Ni-Ni-Ga-Ga, then a slab Ag atom that is
+                           coordinated as Ni-Ni-Ga will look the same as
+                           another slab Ag atom that is coordinated as Ni-Ga-Ga.
+                        2) This algorithm does not differentiate the "normal
+                           coordination" of one elemental atom in the bulk from
+                           another. For example:  If an adsorbate coordination
+                           is Ag-Ag and one of those Ag lost all of its neighbors
+                           (i.e., had fractional coordination=0) while the other
+                           Ag lost none (i.e., fractional coordination=1), then
+                           this method would mark the adsorbate's gcn=0+1=1.
+                           This would be the same gcn as a system whose two
+                           Ag atoms had fractional coordinations of 0.5 (each).
             ads     A vector of binaries that indicate the type of adsorbate.
         Outputs:
             data        A dictionary containing the data we pulled from the Local database.
@@ -254,7 +276,7 @@ class GASPull(object):
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Establish the variables and pull the data from the Local database
-        pulled_factors = ['coordination', 'nextnearestcoordination', 'bulkfwid',
+        pulled_factors = ['coordination', 'neighborcoord', 'bulkfwid',
                           'adsorbate']
         factors = ['gcn', 'adsorbate']
         responses = ['energy']
@@ -276,26 +298,37 @@ class GASPull(object):
         lb_coord = preprocessing.LabelBinarizer()
         lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
                                 if item != 'C' and item != 'O']))
-                                # We filter out C & O because Alamo cries if we include
-                                # symbols that do not actually end up as part of the
-                                # coordination. We can put these back in if we start dealing
-                                # with carbides or oxides, respectively.
         # Determine the maximum coordination of each of the elements in the bulk, c_max.
-        # This will also be used to calculate the GCNs
+        # This will also be used to calculate the GCNs. Note that `cmax` will be a nested
+        # dictionary. The highest level keys are the fwids of the bulks; the second level
+        # keys (which are the first-level values) are the unique elements of that bulk;
+        # and the second-level values are a vector of integers representing the highest
+        # elemental coordination count for an element in the bulk (analogous to
+        # `coordcount`, but more like "max_coordcount").
         try:
+            # Calculating `cmax` takes a solid amount of time. Let's see if an old,
+            # pickled version of it is lying around before we try calculating it
+            # all over again.
             with open('./pkls/cmax.pkl', 'rb') as fname:
                 cmax = pickle.load(fname)
         except IOError:
             with utils.get_aux_db() as aux_db:
+                # `bulks` is a dictionary of all of the bulks we've relaxed, where
+                # the key is the fwid and the value is the ase.Atoms object.
                 bulks = {fwid: mongo_doc_atoms(aux_db.find({'fwid': fwid})[0])
                          for fwid in np.unique(data['bulkfwid'])}
             cmax = dict.fromkeys(bulks)
             for fwid, bulk in bulks.iteritems():
+                # PyMatGen prep-work before we calculate the coordination count
+                # of each atom in the bulk. Note that `counts` will be analogous
+                # to the sub-dictionary in `cmax`, but instead of "maximum"
+                # coordcount, it'll be a list of all the coordcounts.
                 struct = AseAtomsAdaptor.get_structure(bulk)
                 vcf = VoronoiCoordFinder(struct, allow_pathological=True)
                 bulk_symbols = np.unique(bulk.get_chemical_symbols())
                 counts = dict.fromkeys(bulk_symbols, [])
                 for i, atom in enumerate(bulk):
+                    # We use a try/except block to address QHull errors.
                     try:
                         neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
                         neighbor_atoms = [neighbor_site.species_string
@@ -308,19 +341,54 @@ class GASPull(object):
                         print(message)
                         print('We might have gotten a Qhull error at fwid=%s, atom #%s (%s)' \
                               % (fwid, i, atom.symbol))
+                        # If we get an error, then just put an empty vector in there
+                        # and move on. We need to put this empty vector here
+                        # so that we don't break numpy later on.
                         counts[atom.symbol].append([0]*len(lb_coord.transform([''])))
+                # Use `counts` to populate `cmax`
                 cmax[fwid] = {symbol: np.maximum.reduce(count)
                               for symbol, count in counts.iteritems()}
+            # Save our results to a pickle so we don't have to do this again.
             with open('./pkls/cmax.pkl', 'wb') as fname:
                 pickle.dump(cmax, fname)
 
-        ## Pre-process the GCNs.
-        #p_data['coordination'] = np.array([np.sum(lb_coord.transform(coord.split('-')), axis=0)
-                                           #for coord in data['coordination']])
-        #p_data['nextnearestcoordination'] = \
-                #np.array([np.sum(lb_coord.transform(ncoord.split('-')), axis=0)
-                          #for ncoord in data['nextnearestcoordination']])
-#
+        # Pre-process the GCNs.
+        p_data['gcn'] = self._coord2coordcount(['']*len(data['energy']))    # Initialize
+        for i, coord in enumerate(data['coordination']):
+            # `data` contains the coordinations as strings,
+            # e.g., "[u'W:N-N', u'W:N-N-N']". This indexing removes the outer shell
+            # to leave a W:N-N', u'W:N-N-N
+            neighbor_coords = data['neighborcoord'][i][3:-2]
+            # Split `neighbor_coords` from one string to a list, where each
+            # element corresponds to a different neighbor. Now the form is
+            # ['W:N-N', 'W:N-N-N']
+            neighbor_coords = neighbor_coords.split('\', u\'')
+            # Take out the pre-labels, leaving a ['N-N', 'N-N-N']
+            neighbor_coords = [neighbor_coord.split(':')[1] for neighbor_coord in neighbor_coords]
+            neighbor_coordcounts = self._coord2coordcount(neighbor_coords)
+            # Calculate and assign the gcn contribution for each neighbor
+            for j, neighbor in enumerate(coord.split('-')):
+                neighbor_coordcount = neighbor_coordcounts[j]
+                # Sometimes the "coordination" that we get out is a function
+                # of the adsorbate alone, and not the bulk. If this happens, then
+                # assume there is no coordination and move on.
+                try:
+                    _cmax = cmax[data['bulkfwid'][i]][neighbor]
+                except KeyError:
+                    continue
+                # The elemental index of `neighbor` within the coordcount vector
+                index = self._coord2coordcount([neighbor]).tolist()[0].index(1)
+                # Add the gcn contribution from this neighor. We use EAFP because
+                # there are some structures where where _cmax = 0, and we can't
+                # divide by zero. In these cases, we add a gcn of one if the
+                # neighbor is coordinated at all.
+                try:
+                    p_data['gcn'][i][index] += sum(neighbor_coordcount)/float(sum(_cmax))
+                except OverflowError:
+                    if sum(neighbor_coordcount) >= 1:
+                        p_data['gcn'][i][index] += 1
+
+        pdb.set_trace()
         ## Stack the data to create the outputs
         #x = self._stack(p_data, factors)
         #y = self._stack(p_data, responses)
