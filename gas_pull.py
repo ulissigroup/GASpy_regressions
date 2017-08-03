@@ -7,6 +7,7 @@ Note that this script uses the term "factors". Some people may call these "featu
 '''
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
+import sys
 import pdb
 import pickle
 import numpy as np
@@ -16,6 +17,7 @@ from sklearn.model_selection import train_test_split
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.analysis.structure_analyzer import VoronoiCoordFinder
 from vasp.mongo import mongo_doc_atoms
+sys.path.insert(0, '../')
 from gaspy import utils
 
 
@@ -322,13 +324,14 @@ class GASPull(object):
             cmax = dict.fromkeys(bulks)
             for fwid, bulk in bulks.iteritems():
                 # PyMatGen prep-work before we calculate the coordination count
-                # of each atom in the bulk. Note that `counts` will be analogous
-                # to the sub-dictionary in `cmax`, but instead of "maximum"
-                # coordcount, it'll be a list of all the coordcounts.
+                # of each atom in the bulk. `neighbor_coords` a dictionary the coordination
+                # numbers for each atom in the bulk, but sorted such that each key
+                # is a different element and each value is a list of coordination numbers
+                # (for each occurence of that element in the bulk).
                 struct = AseAtomsAdaptor.get_structure(bulk)
                 vcf = VoronoiCoordFinder(struct, allow_pathological=True)
                 bulk_symbols = np.unique(bulk.get_chemical_symbols())
-                counts = dict.fromkeys(bulk_symbols, [])
+                neighbor_coords = dict.fromkeys(bulk_symbols, [])
                 for i, atom in enumerate(bulk):
                     # We use a try/except block to address QHull errors. Since we can't
                     # figure out how to define a QHull error, we put down a blanket
@@ -337,22 +340,19 @@ class GASPull(object):
                         neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
                         neighbor_atoms = [neighbor_site.species_string
                                           for neighbor_site in neighbor_sites]
-                        counts[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms),
-                                                          axis=0))
+                        neighbor_coords[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms)))
                     except Exception as ex:
                         template = 'An exception of type {0} occurred. Arguments:\n{1!r}'
                         message = template.format(type(ex).__name__, ex.args)
                         print(message)
                         print('We might have gotten a Qhull error at fwid=%s, atom #%s (%s)' \
                               % (fwid, i, atom.symbol))
-                        # If we get an error, then just put an empty vector in there
-                        # and move on. We need to put this empty vector here
-                        # so that we don't break numpy later on.
-                        counts[atom.symbol].append([0]*len(lb_coord.transform([''])))
-                # Use `counts` to populate `cmax`. We turn it into a float here to do
-                # the "hard work" up front and inside the pickle.
-                cmax[fwid] = {symbol: float(sum(np.maximum.reduce(count)))
-                              for symbol, count in counts.iteritems()}
+                        # If we get an error, then just put a zero and move on because,
+                        # well, we need to put something.
+                        neighbor_coords[atom.symbol].append(0)
+                # Use `neighbor_coords` to populate `cmax`.
+                cmax[fwid] = {symbol: max(neighbor_coord)
+                              for symbol, neighbor_coord in neighbor_coords.iteritems()}
             # Save our results to a pickle so we don't have to do this again.
             with open(pkl_name, 'wb') as fname:
                 pickle.dump(cmax, fname)
@@ -378,7 +378,7 @@ class GASPull(object):
                 try:
                     _cmax = cmax[data['bulkfwid'][i]][neighbor]
                     # The index of `neighbor`'s element within the coordcount vector
-                    index, __lb = self._coord2coordcount([neighbor]).tolist()[0].index(1)
+                    index = self._coord2coordcount([neighbor])[0].tolist()[0].index(1)
                     try:
                         # Add the gcn contribution from this neighor.
                         p_data['gcn'][i][index] += neighbor_cn/_cmax
@@ -396,7 +396,7 @@ class GASPull(object):
                         p_data['gcn'][i][index] += 1
             try:
                 if not i % 100:
-                    print("On analysis #%s" % i)
+                    print("Pulling out data point #%s for GCN" % i)
             except ZeroDivisionError:
                 pass
 
