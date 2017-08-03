@@ -350,15 +350,19 @@ class GASPull(object):
                         # If we get an error, then just put a zero and move on because,
                         # well, we need to put something.
                         neighbor_coords[atom.symbol].append(0)
-                # Use `neighbor_coords` to populate `cmax`.
-                cmax[fwid] = {symbol: max(neighbor_coord)
+                # Use `neighbor_coords` to populate `cmax`. We also make it a float
+                # so that we don't have to do it later (i.e., do it up front).
+                cmax[fwid] = {symbol: float(max(neighbor_coord))
                               for symbol, neighbor_coord in neighbor_coords.iteritems()}
             # Save our results to a pickle so we don't have to do this again.
             with open(pkl_name, 'wb') as fname:
                 pickle.dump(cmax, fname)
 
-        # Pre-process the GCNs.
-        p_data['gcn'], __lb = self._coord2coordcount(['']*len(data['energy']))    # Initialize
+        # Pre-process the GCNs. But first we initialize and then turn the GCN
+        # array into a float array, since we'll be adding fractional coordination
+        # numbers
+        p_data['gcn'], __lb = self._coord2coordcount(['']*len(data['energy']))
+        p_data['gcn'] = p_data['gcn'].astype(float)
         for i, coord in enumerate(data['coordination']):
             # `data` contains the coordinations as strings,
             # e.g., "[u'W:N-N', u'W:N-N-N']". This indexing removes the outer shell
