@@ -102,8 +102,10 @@ class GASPull(object):
             coords      A list of strings indicating the coordination, e.g.,
                         ['Ag-Au-Au', 'Au']
         Outputs:
-            coordcounts A numpy array of coordination counts, e.g.,
+            coordcount  A numpy array of coordination counts, e.g.,
                         np.array([1 2 0 0 0], [0 1 0 0 0])
+            lb          The label binarizer used to turn the strings into
+                        lists of vectors
         '''
         # Get ALL of the symbols for the elements that we have in the entire DB
         symbols = self._pull(['symbols'])['symbols']
@@ -123,7 +125,7 @@ class GASPull(object):
         # to summate each list into a count list, [1 2 0 0 0]
         coordcount = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
                                for coord in coords])
-        return coordcount
+        return coordcount, lb
 
 
     def energy_fr_coordcount_ads(self):
@@ -163,7 +165,7 @@ class GASPull(object):
         lb_ads.fit(ads)
         p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
         # Pre-process the coordination
-        p_data['coordination'] = self._coord2coordcount(data['coordination'])
+        p_data['coordination'], lb_coord = self._coord2coordcount(data['coordination'])
 
         # Stack the data to create the outputs
         x = self._stack(p_data, factors)
@@ -219,9 +221,9 @@ class GASPull(object):
         lb_ads.fit(ads)
         p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
         # Pre-process the coordination counts
-        p_data['coordination'] = self._coord2coordcount(data['coordination'])
+        p_data['coordination'], lb_coord = self._coord2coordcount(data['coordination'])
         # Pre-process the next nearest coordination counts
-        p_data['nextnearestcoordination'] = self._coord2coordcount(data['nextnearestcoordination'])
+        p_data['nextnearestcoordination'], lb_nncoord = self._coord2coordcount(data['nextnearestcoordination'])
 
         # Stack the data to create the outputs
         x = self._stack(p_data, factors)
@@ -356,7 +358,7 @@ class GASPull(object):
                 pickle.dump(cmax, fname)
 
         # Pre-process the GCNs.
-        p_data['gcn'] = self._coord2coordcount(['']*len(data['energy']))    # Initialize
+        p_data['gcn'], __lb = self._coord2coordcount(['']*len(data['energy']))    # Initialize
         for i, coord in enumerate(data['coordination']):
             # `data` contains the coordinations as strings,
             # e.g., "[u'W:N-N', u'W:N-N-N']". This indexing removes the outer shell
@@ -376,7 +378,7 @@ class GASPull(object):
                 try:
                     _cmax = cmax[data['bulkfwid'][i]][neighbor]
                     # The index of `neighbor`'s element within the coordcount vector
-                    index = self._coord2coordcount([neighbor]).tolist()[0].index(1)
+                    index, __lb = self._coord2coordcount([neighbor]).tolist()[0].index(1)
                     try:
                         # Add the gcn contribution from this neighor.
                         p_data['gcn'][i][index] += neighbor_cn/_cmax
@@ -397,18 +399,17 @@ class GASPull(object):
                     print("On analysis #%s" % i)
             except ZeroDivisionError:
                 pass
-        pdb.set_trace()
 
-        ## Stack the data to create the outputs
-        #x = self._stack(p_data, factors)
-        #y = self._stack(p_data, responses)
-#
-        ## If specified, return the split data and the raw data
-        #if self.split:
-            #x_train, x_test, y_train, y_test = train_test_split(x, y,
-                                                                #train_size=self.train_size,
-                                                                #random_state=self.random_state)
-            #return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        ## If we are not splitting the data, then simply returt x, y, and the raw data
-        #else:
-            #return x, y, data, lb_ads, lb_coord
+        # Stack the data to create the outputs
+        x = self._stack(p_data, factors)
+        y = self._stack(p_data, responses)
+
+        # If specified, return the split data and the raw data
+        if self.split:
+            x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                train_size=self.train_size,
+                                                                random_state=self.random_state)
+            return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
+        # If we are not splitting the data, then simply returt x, y, and the raw data
+        else:
+            return x, y, data, lb_ads, lb_coord
