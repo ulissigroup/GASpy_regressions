@@ -302,14 +302,14 @@ class GASPull(object):
         # This will also be used to calculate the GCNs. Note that `cmax` will be a nested
         # dictionary. The highest level keys are the fwids of the bulks; the second level
         # keys (which are the first-level values) are the unique elements of that bulk;
-        # and the second-level values are a vector of integers representing the highest
-        # elemental coordination count for an element in the bulk (analogous to
-        # `coordcount`, but more like "max_coordcount").
+        # and the second-level values are naive coordination numbers (i.e., they treat
+        # all elements the same).
+        pkl_name = './pkls/cmax.pkl'
         try:
             # Calculating `cmax` takes a solid amount of time. Let's see if an old,
             # pickled version of it is lying around before we try calculating it
             # all over again.
-            with open('./pkls/cmax.pkl', 'rb') as fname:
+            with open(pkl_name, 'rb') as fname:
                 cmax = pickle.load(fname)
         except IOError:
             with utils.get_aux_db() as aux_db:
@@ -328,7 +328,9 @@ class GASPull(object):
                 bulk_symbols = np.unique(bulk.get_chemical_symbols())
                 counts = dict.fromkeys(bulk_symbols, [])
                 for i, atom in enumerate(bulk):
-                    # We use a try/except block to address QHull errors.
+                    # We use a try/except block to address QHull errors. Since we can't
+                    # figure out how to define a QHull error, we put down a blanket
+                    # exception and spit it out so the user will know what happened.
                     try:
                         neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
                         neighbor_atoms = [neighbor_site.species_string
@@ -345,11 +347,12 @@ class GASPull(object):
                         # and move on. We need to put this empty vector here
                         # so that we don't break numpy later on.
                         counts[atom.symbol].append([0]*len(lb_coord.transform([''])))
-                # Use `counts` to populate `cmax`
-                cmax[fwid] = {symbol: np.maximum.reduce(count)
+                # Use `counts` to populate `cmax`. We turn it into a float here to do
+                # the "hard work" up front and inside the pickle.
+                cmax[fwid] = {symbol: float(sum(np.maximum.reduce(count)))
                               for symbol, count in counts.iteritems()}
             # Save our results to a pickle so we don't have to do this again.
-            with open('./pkls/cmax.pkl', 'wb') as fname:
+            with open(pkl_name, 'wb') as fname:
                 pickle.dump(cmax, fname)
 
         # Pre-process the GCNs.
@@ -360,35 +363,42 @@ class GASPull(object):
             # to leave a W:N-N', u'W:N-N-N
             neighbor_coords = data['neighborcoord'][i][3:-2]
             # Split `neighbor_coords` from one string to a list, where each
-            # element corresponds to a different neighbor. Now the form is
+            # element corresponds to a different neighbor. Now the form will be
             # ['W:N-N', 'W:N-N-N']
             neighbor_coords = neighbor_coords.split('\', u\'')
-            # Take out the pre-labels, leaving a ['N-N', 'N-N-N']
+            # Take out the pre-labels, leaving a ['N-N', 'N-N-N']. The indexing
+            # of this list is identical to the order-of-appearance within `coord`
             neighbor_coords = [neighbor_coord.split(':')[1] for neighbor_coord in neighbor_coords]
-            neighbor_coordcounts = self._coord2coordcount(neighbor_coords)
             # Calculate and assign the gcn contribution for each neighbor
             for j, neighbor in enumerate(coord.split('-')):
-                neighbor_coordcount = neighbor_coordcounts[j]
-                # Sometimes the "coordination" that we get out is a function
-                # of the adsorbate alone, and not the bulk. If this happens, then
-                # assume there is no coordination and move on.
+                # The classical coordination number of the neighbor (excluding adsorbate)
+                neighbor_cn = len(neighbor_coords[j].split('-'))
                 try:
                     _cmax = cmax[data['bulkfwid'][i]][neighbor]
+                    # The index of `neighbor`'s element within the coordcount vector
+                    index = self._coord2coordcount([neighbor]).tolist()[0].index(1)
+                    try:
+                        # Add the gcn contribution from this neighor.
+                        p_data['gcn'][i][index] += neighbor_cn/_cmax
+                    # If _cmax somehow turns out to be zero, then add a gcn of
+                    # 1 (if the neighbor is coordinated at all)
+                    except ZeroDivisionError:
+                        if neighbor_cn:
+                            p_data['gcn'][i][index] += 1
+                # If the `coord` ends up containing an element that's not
+                # in the bulk (which only happens on edge cases where
+                # PyMatGen fails us), then simply set the neighbor_cn to 1
+                # (if the neighbor is coordinated at all).
                 except KeyError:
-                    continue
-                # The elemental index of `neighbor` within the coordcount vector
-                index = self._coord2coordcount([neighbor]).tolist()[0].index(1)
-                # Add the gcn contribution from this neighor. We use EAFP because
-                # there are some structures where where _cmax = 0, and we can't
-                # divide by zero. In these cases, we add a gcn of one if the
-                # neighbor is coordinated at all.
-                try:
-                    p_data['gcn'][i][index] += sum(neighbor_coordcount)/float(sum(_cmax))
-                except OverflowError:
-                    if sum(neighbor_coordcount) >= 1:
+                    if neighbor_cn:
                         p_data['gcn'][i][index] += 1
-
+            try:
+                if not i % 100:
+                    print("On analysis #%s" % i)
+            except ZeroDivisionError:
+                pass
         pdb.set_trace()
+
         ## Stack the data to create the outputs
         #x = self._stack(p_data, factors)
         #y = self._stack(p_data, responses)
