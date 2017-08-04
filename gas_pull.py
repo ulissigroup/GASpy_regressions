@@ -152,9 +152,10 @@ class GASPull(object):
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Establish the variables and pull the data from the Local database
+        pulled_factors = ['coordination', 'adsorbate', 'mpid', 'miller']
         factors = ['coordination', 'adsorbate']
         responses = ['energy']
-        data = self._pull(factors+responses+['symbols'])
+        data = self._pull(pulled_factors+responses+['symbols'])
         # Initialize a second dictionary, `p_data`, that will be identical to the `data`
         # dictionary, except the values will be pre-processed data, not "raw" data.
         p_data = dict.fromkeys(factors+responses, None)
@@ -208,9 +209,10 @@ class GASPull(object):
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Establish the variables and pull the data from the Local database
+        pulled_factors = ['coordination', 'nextnearestcoordination', 'adsorbate', 'mpid', 'miller']
         factors = ['coordination', 'nextnearestcoordination', 'adsorbate']
         responses = ['energy']
-        data = self._pull(factors+responses+['symbols'])
+        data = self._pull(pulled_factors+responses+['symbols'])
         # Initialize a second dictionary, `p_data`, that will be identical to the `data`
         # dictionary, except the values will be pre-processed data, not "raw" data.
         p_data = dict.fromkeys(factors+responses, None)
@@ -281,7 +283,7 @@ class GASPull(object):
         '''
         # Establish the variables and pull the data from the Local database
         pulled_factors = ['coordination', 'neighborcoord', 'bulkfwid',
-                          'adsorbate']
+                          'adsorbate', 'mpid', 'miller']
         factors = ['gcn', 'adsorbate']
         responses = ['energy']
         data = self._pull(pulled_factors+responses+['symbols'])
