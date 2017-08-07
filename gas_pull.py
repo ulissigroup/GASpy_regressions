@@ -7,11 +7,11 @@ Note that this script uses the term "factors". Some people may call these "featu
 '''
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
-import sys
 import pdb
+import warnings
+import sys
 import pickle
 import numpy as np
-from ase.db import connect
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -22,58 +22,53 @@ from gaspy import utils
 
 
 class GASPull(object):
-    def __init__(self, db_loc, vasp_settings,
-                 split=False,
-                 energy_min=-4, energy_max=4, slab_move_max=1.5, ads_move_max=1.5, fmax_max=0.5,
+    def __init__(self, db_loc,
+                 vasp_settings=None, split=False,
+                 energy_min=-4, energy_max=4, fmax_max=0.5,
+                 ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
                  train_size=0.75, random_state=42):
         '''
-        Connect to the database and pull out the pertinent rows.
+        Connect to the database and pull out the pertinent docs.
         INPUTS:
-        db_loc          The full name of the path to the *.db file. Do not include the *.db file
-                        the path
-        vasp_settings   A string of vasp settings. Use the vasp_settings_to_str function in GAspy
-        split           Boolean that is true if you want to split the data into a training and
-                        test sets
-        energy_min      The minimum adsorption energy to pull from the Local DB (eV)
-        energy_max      The maximum adsorption energy to pull from the Local DB (eV)
-        ads_move_max    The maximum distance that an adsorbate atom may move (angstrom)
-        slab_move_max   The maximum distance that a slab atom may move (angstrom)
-        fmax_max        The upper limit on the maximum force on an atom in the system
+        db_loc              The full name of the path to the *.db file. Do not include the *.db
+                            file the path
+        vasp_settings       A string of vasp settings. Use the vasp_settings_to_str function in
+                            GAspy
+        split               Boolean that is true if you want to split the data into a training and
+                            test sets
+        energy_min          The minimum adsorption energy to pull from the Local DB (eV)
+        energy_max          The maximum adsorption energy to pull from the Local DB (eV)
+        ads_move_max        The maximum distance that an adsorbate atom may move (angstrom)
+        bare_slab_move_max  The maxmimum distance that a slab atom may move when it is relaxed
+                            without an adsorbate (angstrom)
+        slab_move_max       The maximum distance that a slab atom may move (angstrom)
+        fmax_max            The upper limit on the maximum force on an atom in the system
         '''
+        # The default value for `vasp_settings` will be `None`, which means that we take all
+        # calculations and do not filter via vasp settings. We define the default here
+        # just in case Python doesn't play well with this non-straight-forward default.
+        if not vasp_settings:
+            vasp_settings = utils.vasp_settings_to_str({})
+
+        # Create a function that returns a mongo cursor object given the arguments passed
+        # to GASPull
+        with utils.get_adsorption_db() as client:
+            def __create_cursor(fingerprints, adsorbates):
+                utils.get_cursor(client, 'adsorption', fingerprints,
+                                 adsorbates=adsorbates,
+                                 vasp_settings=vasp_settings,
+                                 energy_min=energy_min,
+                                 energy_max=energy_max,
+                                 fmax_max=fmax_max,
+                                 ads_move_max=ads_move_max,
+                                 bare_slab_move_max=bare_slab_move_max,
+                                 slab_move_max=slab_move_max)
+            self.create_cursor = __create_cursor
+
         # Pass along various parameters to use later
         self.split = split
         self.train_size = train_size
         self.random_state = random_state
-
-        # Update PYTHONPATH so we can connect to the Local database, and then pull from it
-        with connect(db_loc+'/adsorption_energy_database.db') as db:
-            # A list of ase-db rows are stored in self.rows for later use
-            self.rows = [row for row in db.select()
-                         if all([row[key] == vasp_settings[key] for key in vasp_settings])
-                         and energy_min < row.energy < energy_max
-                         and row.max_surface_movement < slab_move_max
-                         and row.max_adsorbate_movement < ads_move_max
-                         and row.fmax < fmax_max]
-            # If we did not pull anything from the database, then stop the script and alert the user
-            if len(self.rows) == 0:
-                raise Exception('DATABASE ERROR:  Could not find any database rows to match input settings. Please verify db_loc, vasp_settings, or whether or not the database actually has the data you are looking for.')
-
-
-    def _pull(self, variables):
-        '''
-        This function pulls data from the database.
-        Input:
-            `variables`, is a list of strings that correspond to the ase-db row attribute
-            that you want to pull. These strings must correspond to the row attributes,
-            i.e., row[string] must return a value.
-        Output:
-            `data` is a dictionary whose keys are the variables names and whose values are
-            lists of the data
-        '''
-        data = dict.fromkeys(variables, None)
-        for variable in variables:
-            data[variable] = [row[variable] for row in self.rows]
-        return data
 
 
     def _stack(self, data_dict, keys):
