@@ -22,27 +22,27 @@ from gaspy import utils
 
 
 class GASPull(object):
-    def __init__(self, db_loc,
+    def __init__(self,
                  vasp_settings=None, split=False,
-                 energy_min=-4, energy_max=4, fmax_max=0.5,
+                 energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
                  train_size=0.75, random_state=42):
         '''
-        Connect to the database and pull out the pertinent docs.
-        INPUTS:
-        db_loc              The full name of the path to the *.db file. Do not include the *.db
-                            file the path
-        vasp_settings       A string of vasp settings. Use the vasp_settings_to_str function in
-                            GAspy
-        split               Boolean that is true if you want to split the data into a training and
-                            test sets
-        energy_min          The minimum adsorption energy to pull from the Local DB (eV)
-        energy_max          The maximum adsorption energy to pull from the Local DB (eV)
-        ads_move_max        The maximum distance that an adsorbate atom may move (angstrom)
-        bare_slab_move_max  The maxmimum distance that a slab atom may move when it is relaxed
-                            without an adsorbate (angstrom)
-        slab_move_max       The maximum distance that a slab atom may move (angstrom)
-        fmax_max            The upper limit on the maximum force on an atom in the system
+        Connect to the database and pull out the pertinent docs/information in a form that
+        may be regressed/manipulated.
+
+        Inputs:
+            vasp_settings       A string of vasp settings. Use the vasp_settings_to_str
+                                function in GAspy
+            split               Boolean that is true if you want to split the data into a
+                                training and test sets
+            energy_min          The minimum adsorption energy to pull from the Local DB (eV)
+            energy_max          The maximum adsorption energy to pull from the Local DB (eV)
+            ads_move_max        The maximum distance that an adsorbate atom may move (angstrom)
+            bare_slab_move_max  The maxmimum distance that a slab atom may move when it is relaxed
+                                without an adsorbate (angstrom)
+            slab_move_max       The maximum distance that a slab atom may move (angstrom)
+            f_max               The upper limit on the maximum force on an atom in the system
         '''
         # The default value for `vasp_settings` will be `None`, which means that we take all
         # calculations and do not filter via vasp settings. We define the default here
@@ -53,22 +53,100 @@ class GASPull(object):
         # Create a function that returns a mongo cursor object given the arguments passed
         # to GASPull
         with utils.get_adsorption_db() as client:
-            def __create_cursor(fingerprints, adsorbates):
-                utils.get_cursor(client, 'adsorption', fingerprints,
-                                 adsorbates=adsorbates,
-                                 vasp_settings=vasp_settings,
-                                 energy_min=energy_min,
-                                 energy_max=energy_max,
-                                 fmax_max=fmax_max,
-                                 ads_move_max=ads_move_max,
-                                 bare_slab_move_max=bare_slab_move_max,
-                                 slab_move_max=slab_move_max)
-            self.create_cursor = __create_cursor
+            self.client = client
 
         # Pass along various parameters to use later
         self.split = split
         self.train_size = train_size
         self.random_state = random_state
+        self.vasp_settings = vasp_settings
+        self.energy_min = energy_min
+        self.energy_max = energy_max
+        self.f_max = f_max
+        self.ads_move_max = ads_move_max
+        self.bare_slab_move_max = bare_slab_move_max
+        self.slab_move_max = slab_move_max
+
+
+    def _pull(self, fingerprints,
+              adsorbates='default', vasp_settings='default',
+              energy_min='default', energy_max='default', f_max='default',
+              ads_move_max='default', bare_slab_move_max='default',
+              slab_move_max='default'):
+        '''
+        This method really only calls `gaspy.utils.get_parsed_docs`, but it does so
+        with some extra defaults to make it easier for the programmer to make new methods
+        & not worry about a lot of the arguments that `get_parsed_docs` needs.
+        '''
+        # It turns out that Python doesn't like `self.*` assigned as defaults.
+        # Let's hack it. Note that we use the `default` flag instead of the
+        # conventional `None` because the user might want to actually pass a `None`
+        # to this method.
+        if energy_min == 'default':
+            energy_min = self.energy_min
+        if energy_max == 'default':
+            energy_max = self.energy_max
+        if f_max == 'default':
+            f_max = self.f_max
+        if ads_move_max == 'default':
+            ads_move_max = self.ads_move_max
+        if bare_slab_move_max == 'default':
+            bare_slab_move_max = self.bare_slab_move_max
+        if slab_move_max == 'default':
+            slab_move_max = self.slab_move_max
+        if vasp_settings == 'default':
+            vasp_settings = self.vasp_settings
+
+        return utils.get_parsed_docs(self.client, 'adsorption', fingerprints,
+                                     adsorbates=None, calc_settings=None,
+                                     vasp_settings=vasp_settings,
+                                     energy_min=energy_min, energy_max=energy_max,
+                                     f_max=f_max, ads_move_max=ads_move_max,
+                                     bare_slab_move_max=bare_slab_move_max,
+                                     slab_move_max=slab_move_max)
+
+
+    def _coord2coordcount(self, coords):
+        '''
+        Turn a human-readable string coordination into a vector of
+        coordination count.
+
+        Inputs:
+            coords      A list of strings indicating the coordination, e.g.,
+                        ['Ag-Au-Au', 'Au']
+        Outputs:
+            coordcount  A numpy array of coordination counts, e.g.,
+                        np.array([1 2 0 0 0], [0 1 0 0 0])
+            lb          The label binarizer used to turn the strings into
+                        lists of vectors
+        '''
+        # Get ALL of the symbols for the elements that we have in the entire DB
+        symbols = self._pull({'symbols': '$atoms.chemical_symbols'},
+                             vasp_settings=None, energy_min=None, energy_max=None,
+                             f_max=None, ads_move_max=None, bare_slab_move_max=None,
+                             slab_move_max=None)
+        # Parse the symbols to find the unique ones.
+        unq_symbols = np.unique([item for sublist in symbols['symbols'] for item in sublist
+                                 if (item != 'C' and item != 'O')])
+        # TODO:  Get rid of C & O filter if we end up using carbides/oxides. We filter
+        # because Alamo doesn't like unused features.
+
+        # Make a binarizer out of all the symbols.
+        # We filter out C & O because Alamo cries if we include
+        # symbols that do not actually end up as part of the
+        # coordination. We can put these back in if we start dealing
+        # with carbides or oxides, respectively.
+        lb = preprocessing.LabelBinarizer()
+        lb.fit(np.unique([item for sublist in symbols for item in sublist
+                          if item != 'C' and item != 'O']))
+
+        # Use the binarizer to turn a coordination into a list of sparse
+        # binary vectors. For example: We could turn `Ag-Au-Au` into
+        # [[1 0 0 0 0], [0 1 0 0 0], [0 1 0 0 0]]. We then use np.sum
+        # to summate each list into a count list, [1 2 0 0 0]
+        coordcount = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
+                               for coord in coords])
+        return coordcount, lb
 
 
     def _stack(self, data_dict, keys):
@@ -88,41 +166,6 @@ class GASPull(object):
         for key in keys:
             data_tup += (data_dict[key],)
         return np.hstack(data_tup)
-
-
-    def _coord2coordcount(self, coords):
-        '''
-        Turn a human-readable string coordination into a vector of
-        coordination count.
-
-        Inputs:
-            coords      A list of strings indicating the coordination, e.g.,
-                        ['Ag-Au-Au', 'Au']
-        Outputs:
-            coordcount  A numpy array of coordination counts, e.g.,
-                        np.array([1 2 0 0 0], [0 1 0 0 0])
-            lb          The label binarizer used to turn the strings into
-                        lists of vectors
-        '''
-        # Get ALL of the symbols for the elements that we have in the entire DB
-        symbols = self._pull(['symbols'])['symbols']
-
-        # Make a binarizer out of all the symbols.
-        # We filter out C & O because Alamo cries if we include
-        # symbols that do not actually end up as part of the
-        # coordination. We can put these back in if we start dealing
-        # with carbides or oxides, respectively.
-        lb = preprocessing.LabelBinarizer()
-        lb.fit(np.unique([item for sublist in symbols for item in sublist
-                          if item != 'C' and item != 'O']))
-
-        # Use the binarizer to turn a coordination into a list of sparse
-        # binary vectors. For example: We could turn `Ag-Au-Au` into
-        # [[1 0 0 0 0], [0 1 0 0 0], [0 1 0 0 0]]. We then use np.sum
-        # to summate each list into a count list, [1 2 0 0 0]
-        coordcount = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
-                               for coord in coords])
-        return coordcount, lb
 
 
     def energy_fr_coordcount_ads(self):
@@ -146,14 +189,24 @@ class GASPull(object):
             lb_ads      The label binarizer used to binarize the adsorbate
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
-        # Establish the variables and pull the data from the Local database
-        pulled_factors = ['coordination', 'adsorbate', 'mpid', 'miller']
+        # Identify the factors & responses. This will be used to build the outputs.
         factors = ['coordination', 'adsorbate']
         responses = ['energy']
-        data = self._pull(pulled_factors+responses+['symbols'])
+        # Establish the variables to pull (i.e., `fingerprints`) and pull it from
+        # the database
+        fingerprints = {'mpid': '$processed_data.calculation_info.mpid',
+                        'miller': '$processed_data.calculation_info.miller',
+                        'coordination': '$processed_data.fp_final.coordination',
+                        'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'energy': '$results.energy'}
+        data = self._pull(fingerprints=fingerprints)
+        # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
+        # so we pull it out into its own key.
+        data['adsorbate'] = [adsorbates[0] for adsorbates in data['adsorbates']]
+
         # Initialize a second dictionary, `p_data`, that will be identical to the `data`
         # dictionary, except the values will be pre-processed data, not "raw" data.
-        p_data = dict.fromkeys(factors+responses, None)
+        p_data = dict.fromkeys(factors+responses)
 
         # Pre-process the energy
         p_data['energy'] = np.array(data['energy'])
