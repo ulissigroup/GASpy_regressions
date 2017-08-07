@@ -74,9 +74,9 @@ class GASPull(object):
               ads_move_max='default', bare_slab_move_max='default',
               slab_move_max='default'):
         '''
-        This method really only calls `gaspy.utils.get_parsed_docs`, but it does so
+        This method really only calls `gaspy.utils.get_docs`, but it does so
         with some extra defaults to make it easier for the programmer to make new methods
-        & not worry about a lot of the arguments that `get_parsed_docs` needs.
+        & not worry about a lot of the arguments that `get_docs` needs.
         '''
         # It turns out that Python doesn't like `self.*` assigned as defaults.
         # Let's hack it. Note that we use the `default` flag instead of the
@@ -97,13 +97,13 @@ class GASPull(object):
         if vasp_settings == 'default':
             vasp_settings = self.vasp_settings
 
-        return utils.get_parsed_docs(self.client, 'adsorption', fingerprints,
-                                     adsorbates=None, calc_settings=None,
-                                     vasp_settings=vasp_settings,
-                                     energy_min=energy_min, energy_max=energy_max,
-                                     f_max=f_max, ads_move_max=ads_move_max,
-                                     bare_slab_move_max=bare_slab_move_max,
-                                     slab_move_max=slab_move_max)
+        return utils.get_docs(self.client, 'adsorption', fingerprints,
+                              adsorbates=None, calc_settings=None,
+                              vasp_settings=vasp_settings,
+                              energy_min=energy_min, energy_max=energy_max,
+                              f_max=f_max, ads_move_max=ads_move_max,
+                              bare_slab_move_max=bare_slab_move_max,
+                              slab_move_max=slab_move_max)[1]
 
 
     def _coord2coordcount(self, coords):
