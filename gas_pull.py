@@ -124,9 +124,9 @@ class GASPull(object):
         symbols = self._pull({'symbols': '$atoms.chemical_symbols'},
                              vasp_settings=None, energy_min=None, energy_max=None,
                              f_max=None, ads_move_max=None, bare_slab_move_max=None,
-                             slab_move_max=None)
+                             slab_move_max=None)['symbols']
         # Parse the symbols to find the unique ones.
-        unq_symbols = np.unique([item for sublist in symbols['symbols'] for item in sublist
+        unq_symbols = np.unique([item for sublist in symbols for item in sublist
                                  if (item != 'C' and item != 'O')])
         # TODO:  Get rid of C & O filter if we end up using carbides/oxides. We filter
         # because Alamo doesn't like unused features.
@@ -178,8 +178,8 @@ class GASPull(object):
                             counts for other elements (e.g., Al or Pt).
             ads             A vector of binaries that indicate the type of adsorbate.
         Outputs:
-            data        A dictionary containing the data we pulled from the Local database.
-                        This object is taken raw from the _pull method.
+            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
+                        the adsorption database. This object is taken raw from the _pull method.
             x           A stacked array containing all of the data for all of the factors
             y           A stacked array containing all of the data for all of the responses
             x_train     A subset of `x` intended to use as a training set
@@ -199,40 +199,42 @@ class GASPull(object):
                         'coordination': '$processed_data.fp_final.coordination',
                         'adsorbates': '$processed_data.calculation_info.adsorbate_names',
                         'energy': '$results.energy'}
-        data = self._pull(fingerprints=fingerprints)
+        p_docs = self._pull(fingerprints=fingerprints)
         # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
         # so we pull it out into its own key.
-        data['adsorbate'] = [adsorbates[0] for adsorbates in data['adsorbates']]
+        p_docs['adsorbate'] = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
 
-        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
-        # dictionary, except the values will be pre-processed data, not "raw" data.
-        p_data = dict.fromkeys(factors+responses)
+        # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
+        # dictionary, except the values will be pre-processed such that they may be accepted
+        # and readable by regressors
+        features = dict.fromkeys(factors+responses)
 
         # Pre-process the energy
-        p_data['energy'] = np.array(data['energy'])
+        features['energy'] = np.array(p_docs['energy'])
         # Pre-process the adsorbate identity via binarizer
-        ads = np.unique(data['adsorbate'])
+        ads = np.unique(p_docs['adsorbate'])
         lb_ads = preprocessing.LabelBinarizer()
         lb_ads.fit(ads)
-        p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
+        features['adsorbate'] = lb_ads.transform(p_docs['adsorbate'])
         # Pre-process the coordination
-        p_data['coordination'], lb_coord = self._coord2coordcount(data['coordination'])
+        features['coordination'], lb_coord = self._coord2coordcount(p_docs['coordination'])
 
-        # Stack the data to create the outputs
-        x = self._stack(p_data, factors)
-        y = self._stack(p_data, responses)
+        # Stack the p_docs to create the outputs
+        x = self._stack(features, factors)
+        y = self._stack(features, responses)
 
-        # If specified, return the split data and the raw data
+        # If specified, return the features and the p_docs
         if self.split:
             x_train, x_test, y_train, y_test = train_test_split(x, y,
                                                                 train_size=self.train_size,
                                                                 random_state=self.random_state)
-            return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        # If we are not splitting the data, then simply returt x, y, and the raw data
+            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_ads, lb_coord
+        # If we are not splitting the features, then simply returt x, y, and p_docs
         else:
-            return x, y, data, lb_ads, lb_coord
+            return x, y, p_docs, lb_ads, lb_coord
 
 
+    # TODO:  Test
     def energy_fr_coordcount_nncoord_ads(self):
         '''
         Pull data according to the following motifs:
@@ -245,8 +247,8 @@ class GASPull(object):
                             coordinated with the binding atoms' nearest neighbor
             ads             A vector of binaries that indicate the type of adsorbate.
         Outputs:
-            data        A dictionary containing the data we pulled from the Local database.
-                        This object is taken raw from the _pull method.
+            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
+                        the adsorption database. This object is taken raw from the _pull method.
             x           A stacked array containing all of the data for all of the factors
             y           A stacked array containing all of the data for all of the responses
             x_train     A subset of `x` intended to use as a training set
@@ -256,42 +258,55 @@ class GASPull(object):
             lb_ads      The label binarizer used to binarize the adsorbate
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
-        # Establish the variables and pull the data from the Local database
-        pulled_factors = ['coordination', 'nextnearestcoordination', 'adsorbate', 'mpid', 'miller']
+        # Identify the factors & responses. This will be used to build the outputs.
         factors = ['coordination', 'nextnearestcoordination', 'adsorbate']
         responses = ['energy']
-        data = self._pull(pulled_factors+responses+['symbols'])
-        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
-        # dictionary, except the values will be pre-processed data, not "raw" data.
-        p_data = dict.fromkeys(factors+responses, None)
+        # Establish the variables to pull (i.e., `fingerprints`) and pull it from
+        # the database
+        fingerprints = {'mpid': '$processed_data.calculation_info.mpid',
+                        'miller': '$processed_data.calculation_info.miller',
+                        'coordination': '$processed_data.fp_final.coordination',
+                        'nextnearestcoordination': '$processed_data.fp_init.nextnearestcoordination',
+                        'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'energy': '$results.energy'}
+        p_docs = self._pull(fingerprints=fingerprints)
+        # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
+        # so we pull it out into its own key.
+        p_docs['adsorbate'] = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
+
+        # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
+        # dictionary, except the values will be pre-processed such that they may be accepted
+        # and readable by regressors
+        features = dict.fromkeys(factors+responses)
 
         # Pre-process the energy
-        p_data['energy'] = np.array(data['energy'])
+        features['energy'] = np.array(p_docs['energy'])
         # Pre-process the adsorbate identity via binarizer
-        ads = np.unique(data['adsorbate'])
+        ads = np.unique(p_docs['adsorbate'])
         lb_ads = preprocessing.LabelBinarizer()
         lb_ads.fit(ads)
-        p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
+        features['adsorbate'] = lb_ads.transform(p_docs['adsorbate'])
         # Pre-process the coordination counts
-        p_data['coordination'], lb_coord = self._coord2coordcount(data['coordination'])
+        features['coordination'], lb_coord = self._coord2coordcount(p_docs['coordination'])
         # Pre-process the next nearest coordination counts
-        p_data['nextnearestcoordination'], lb_nncoord = self._coord2coordcount(data['nextnearestcoordination'])
+        features['nextnearestcoordination'], lb_nncoord = self._coord2coordcount(p_docs['nextnearestcoordination'])
 
         # Stack the data to create the outputs
-        x = self._stack(p_data, factors)
-        y = self._stack(p_data, responses)
+        x = self._stack(features, factors)
+        y = self._stack(features, responses)
 
-        # If specified, return the split data and the raw data
+        # If specified, return the features and the p_docs
         if self.split:
             x_train, x_test, y_train, y_test = train_test_split(x, y,
                                                                 train_size=self.train_size,
                                                                 random_state=self.random_state)
-            return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        # If we are not splitting the data, then simply returt x, y, and the raw data
+            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_ads, lb_coord
+        # If we are not splitting the features, then simply returt x, y, and p_docs
         else:
-            return x, y, data, lb_ads, lb_coord
+            return x, y, p_docs, lb_ads, lb_coord
 
 
+    # TODO:  Test
     def energy_fr_gcn_ads(self):
         '''
         Pull data according to the following motifs:
@@ -318,8 +333,8 @@ class GASPull(object):
                            Ag atoms had fractional coordinations of 0.5 (each).
             ads     A vector of binaries that indicate the type of adsorbate.
         Outputs:
-            data        A dictionary containing the data we pulled from the Local database.
-                        This object is taken raw from the _pull method.
+            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
+                        the adsorption database. This object is taken raw from the _pull method.
             x           A stacked array containing all of the data for all of the factors
             y           A stacked array containing all of the data for all of the responses
             x_train     A subset of `x` intended to use as a training set
@@ -329,141 +344,133 @@ class GASPull(object):
             lb_ads      The label binarizer used to binarize the adsorbate
             lb_coord    The label binarizer used to binarize the coordination vector
         '''
-        # Establish the variables and pull the data from the Local database
-        pulled_factors = ['coordination', 'neighborcoord', 'bulkfwid',
-                          'adsorbate', 'mpid', 'miller']
+        # Identify the factors & responses. This will be used to build the outputs.
         factors = ['gcn', 'adsorbate']
         responses = ['energy']
-        data = self._pull(pulled_factors+responses+['symbols'])
-        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
-        # dictionary, except the values will be pre-processed data, not "raw" data.
-        p_data = dict.fromkeys(factors+responses, None)
+        # Establish the variables to pull (i.e., `fingerprints`) and pull it from
+        # the database
+        fingerprints = {'mpid': '$processed_data.calculation_info.mpid',
+                        'miller': '$processed_data.calculation_info.miller',
+                        'coordination': '$processed_data.fp_final.coordination',
+                        'neighborcoord': '$processed_data.fp_final.neighborcoord',
+                        'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'bulkfwid': '$processed_data.FW_info.bulk',
+                        'energy': '$results.energy'}
+        p_docs = self._pull(fingerprints=fingerprints)
+        # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
+        # so we pull it out into its own key.
+        p_docs['adsorbate'] = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
+
+        # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
+        # dictionary, except the values will be pre-processed p_docs, not "raw" p_docs.
+        features = dict.fromkeys(factors+responses, None)
 
         # Pre-process the energy
-        p_data['energy'] = np.array(data['energy'])
+        features['energy'] = np.array(p_docs['energy'])
         # Pre-process the adsorbate identity via binarizer
-        ads = np.unique(data['adsorbate'])
+        ads = np.unique(p_docs['adsorbate'])
         lb_ads = preprocessing.LabelBinarizer()
         lb_ads.fit(ads)
-        p_data['adsorbate'] = lb_ads.transform(data['adsorbate'])
+        features['adsorbate'] = lb_ads.transform(p_docs['adsorbate'])
 
         # Create a binarizer for the elements we are looking at so that we can use
         # it to calculate the GCNs
-        lb_coord = preprocessing.LabelBinarizer()
-        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
-                                if item != 'C' and item != 'O']))
+        lb_coord = self._coord2coordcount([''])[1]
         # Determine the maximum coordination of each of the elements in the bulk, c_max.
         # This will also be used to calculate the GCNs. Note that `cmax` will be a nested
         # dictionary. The highest level keys are the fwids of the bulks; the second level
         # keys (which are the first-level values) are the unique elements of that bulk;
         # and the second-level values are naive coordination numbers (i.e., they treat
         # all elements the same).
-        pkl_name = './pkls/cmax.pkl'
-        try:
-            # Calculating `cmax` takes a solid amount of time. Let's see if an old,
-            # pickled version of it is lying around before we try calculating it
-            # all over again.
-            with open(pkl_name, 'rb') as fname:
-                cmax = pickle.load(fname)
-        except IOError:
-            with utils.get_aux_db() as aux_db:
-                # `bulks` is a dictionary of all of the bulks we've relaxed, where
-                # the key is the fwid and the value is the ase.Atoms object.
-                bulks = {fwid: mongo_doc_atoms(aux_db.find({'fwid': fwid})[0])
-                         for fwid in np.unique(data['bulkfwid'])}
-            cmax = dict.fromkeys(bulks)
-            for fwid, bulk in bulks.iteritems():
-                # PyMatGen prep-work before we calculate the coordination count
-                # of each atom in the bulk. `neighbor_coords` a dictionary the coordination
-                # numbers for each atom in the bulk, but sorted such that each key
-                # is a different element and each value is a list of coordination numbers
-                # (for each occurence of that element in the bulk).
-                struct = AseAtomsAdaptor.get_structure(bulk)
-                vcf = VoronoiCoordFinder(struct, allow_pathological=True)
-                bulk_symbols = np.unique(bulk.get_chemical_symbols())
-                neighbor_coords = dict.fromkeys(bulk_symbols, [])
-                for i, atom in enumerate(bulk):
-                    # We use a try/except block to address QHull errors. Since we can't
-                    # figure out how to define a QHull error, we put down a blanket
-                    # exception and spit it out so the user will know what happened.
-                    try:
-                        neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
-                        neighbor_atoms = [neighbor_site.species_string
-                                          for neighbor_site in neighbor_sites]
-                        neighbor_coords[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms)))
-                    except Exception as ex:
-                        template = 'An exception of type {0} occurred. Arguments:\n{1!r}'
-                        message = template.format(type(ex).__name__, ex.args)
-                        print(message)
-                        print('We might have gotten a Qhull error at fwid=%s, atom #%s (%s)' \
-                              % (fwid, i, atom.symbol))
-                        # If we get an error, then just put a zero and move on because,
-                        # well, we need to put something.
-                        neighbor_coords[atom.symbol].append(0)
-                # Use `neighbor_coords` to populate `cmax`. We also make it a float
-                # so that we don't have to do it later (i.e., do it up front).
-                cmax[fwid] = {symbol: float(max(neighbor_coord))
-                              for symbol, neighbor_coord in neighbor_coords.iteritems()}
-            # Save our results to a pickle so we don't have to do this again.
-            with open(pkl_name, 'wb') as fname:
-                pickle.dump(cmax, fname)
+        with utils.get_aux_db() as aux_db:
+            # `bulks` is a dictionary of all of the bulks we've relaxed, where
+            # the key is the fwid and the value is the ase.Atoms object.
+            bulks = {fwid: mongo_doc_atoms(aux_db.find({'fwid': fwid})[0])
+                     for fwid in np.unique(p_docs['bulkfwid'])}
+        cmax = dict.fromkeys(bulks)
+        for fwid, bulk in bulks.iteritems():
+            # PyMatGen prep-work before we calculate the coordination count
+            # of each atom in the bulk. `neighbor_coords` a dictionary the coordination
+            # numbers for each atom in the bulk, but sorted such that each key
+            # is a different element and each value is a list of coordination numbers
+            # (for each occurence of that element in the bulk).
+            struct = AseAtomsAdaptor.get_structure(bulk)
+            vcf = VoronoiCoordFinder(struct, allow_pathological=True)
+            bulk_symbols = np.unique(bulk.get_chemical_symbols())
+            neighbor_coords = dict.fromkeys(bulk_symbols, [])
+            for i, atom in enumerate(bulk):
+                # We use a try/except block to address QHull errors. Since we can't
+                # figure out how to define a QHull error, we put down a blanket
+                # exception and spit it out so the user will know what happened.
+                try:
+                    neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
+                    neighbor_atoms = [neighbor_site.species_string
+                                      for neighbor_site in neighbor_sites]
+                    neighbor_coords[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms)))
+                except Exception as ex:
+                    template = 'An exception of type {0} occurred. Arguments:\n{1!r}'
+                    message = template.format(type(ex).__name__, ex.args)
+                    print(message)
+                    print('We might have gotten a Qhull error at fwid=%s, atom #%s (%s)' \
+                          % (fwid, i, atom.symbol))
+                    # If we get an error, then just put a zero and move on because,
+                    # well, we need to put something.
+                    neighbor_coords[atom.symbol].append(0)
+            # Use `neighbor_coords` to populate `cmax`. We also make it a float
+            # so that we don't have to do it later (i.e., do it up front).
+            cmax[fwid] = {symbol: float(max(neighbor_coord))
+                          for symbol, neighbor_coord in neighbor_coords.iteritems()}
 
         # Pre-process the GCNs. But first we initialize and then turn the GCN
         # array into a float array, since we'll be adding fractional coordination
         # numbers
-        p_data['gcn'], __lb = self._coord2coordcount(['']*len(data['energy']))
-        p_data['gcn'] = p_data['gcn'].astype(float)
-        for i, coord in enumerate(data['coordination']):
-            # `data` contains the coordinations as strings,
-            # e.g., "[u'W:N-N', u'W:N-N-N']". This indexing removes the outer shell
-            # to leave a W:N-N', u'W:N-N-N
-            neighbor_coords = data['neighborcoord'][i][3:-2]
-            # Split `neighbor_coords` from one string to a list, where each
-            # element corresponds to a different neighbor. Now the form will be
-            # ['W:N-N', 'W:N-N-N']
-            neighbor_coords = neighbor_coords.split('\', u\'')
-            # Take out the pre-labels, leaving a ['N-N', 'N-N-N']. The indexing
-            # of this list is identical to the order-of-appearance within `coord`
-            neighbor_coords = [neighbor_coord.split(':')[1] for neighbor_coord in neighbor_coords]
+        features['gcn'], __lb = self._coord2coordcount(['']*len(p_docs['energy']))
+        features['gcn'] = features['gcn'].astype(float)
+        for i, coord in enumerate(p_docs['coordination']):
+            # `p_docs['neighborcoord'][i]` contains the coordinations as a list of strings,
+            # e.g., ['W:N-N', 'W:N-N-N']. Here, we split off the neighbor (i.e., the symbols
+            # before ":") and then count the number of symbols within each coordination,
+            # which we then assign as `neighbor_cn`, which is the conventional coordination
+            # number of each of the adsorbates' neighbors.
+            neighbor_cn = [len(neighbor_coord.split(':')[1].split('-'))
+                           for neighbor_coord in p_docs['neighborcoord'][i]]
             # Calculate and assign the gcn contribution for each neighbor
             for j, neighbor in enumerate(coord.split('-')):
-                # The classical coordination number of the neighbor (excluding adsorbate)
-                neighbor_cn = len(neighbor_coords[j].split('-'))
                 try:
-                    _cmax = cmax[data['bulkfwid'][i]][neighbor]
+                    _cmax = cmax[p_docs['bulkfwid'][i]][neighbor]
                     # The index of `neighbor`'s element within the coordcount vector
                     index = self._coord2coordcount([neighbor])[0].tolist()[0].index(1)
                     try:
                         # Add the gcn contribution from this neighor.
-                        p_data['gcn'][i][index] += neighbor_cn/_cmax
+                        features['gcn'][i][index] += neighbor_cn[j]/_cmax
                     # If _cmax somehow turns out to be zero, then add a gcn of
                     # 1 (if the neighbor is coordinated at all)
                     except ZeroDivisionError:
-                        if neighbor_cn:
-                            p_data['gcn'][i][index] += 1
+                        if neighbor_cn[j]:
+                            features['gcn'][i][index] += 1
                 # If the `coord` ends up containing an element that's not
                 # in the bulk (which only happens on edge cases where
                 # PyMatGen fails us), then simply set the neighbor_cn to 1
                 # (if the neighbor is coordinated at all).
                 except KeyError:
-                    if neighbor_cn:
-                        p_data['gcn'][i][index] += 1
+                    if neighbor_cn[j]:
+                        features['gcn'][i][index] += 1
             try:
                 if not i % 100:
-                    print("Pulling out data point #%s for GCN" % i)
+                    print("Pulling out p_docs point #%s for GCN" % i)
             except ZeroDivisionError:
                 pass
 
-        # Stack the data to create the outputs
-        x = self._stack(p_data, factors)
-        y = self._stack(p_data, responses)
+        # Stack the p_docs to create the outputs
+        x = self._stack(features, factors)
+        y = self._stack(features, responses)
 
-        # If specified, return the split data and the raw data
+        # If specified, return the features and the p_docs
         if self.split:
             x_train, x_test, y_train, y_test = train_test_split(x, y,
                                                                 train_size=self.train_size,
                                                                 random_state=self.random_state)
-            return x, y, data, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        # If we are not splitting the data, then simply returt x, y, and the raw data
+            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_ads, lb_coord
+        # If we are not splitting the features, then simply returt x, y, and p_docs
         else:
-            return x, y, data, lb_ads, lb_coord
+            return x, y, p_docs, lb_ads, lb_coord
