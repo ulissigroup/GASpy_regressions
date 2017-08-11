@@ -19,6 +19,7 @@ from pymatgen.analysis.structure_analyzer import VoronoiCoordFinder
 from vasp.mongo import mongo_doc_atoms
 sys.path.insert(0, '../')
 from gaspy import utils
+from gaspy import defaults
 
 
 class GASPull(object):
@@ -66,6 +67,11 @@ class GASPull(object):
         self.ads_move_max = ads_move_max
         self.bare_slab_move_max = bare_slab_move_max
         self.slab_move_max = slab_move_max
+
+        # Do a quick `_pull` test to see if we even get anything. If not, then alert the user.
+        docs = self._pull(defaults.fingerprints())
+        if not len(docs[docs.keys()[0]]):
+            raise Exception('GASPull failed to find any matches. Please check your query settings.')
 
 
     def _pull(self, fingerprints,
