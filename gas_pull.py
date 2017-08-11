@@ -185,6 +185,55 @@ class GASPull(object):
             return x, y, data, lb_ads, lb_coord
 
 
+    def energy_fr_coordcount(self):
+        '''
+        Pull data according to the following motifs:
+            coord_count     A vector of ordered integers. Each integer represents the number
+                            of atoms of an element that are coordinated with the adsorbate.
+                            For example:  a coordination site of Au-Ag-Ag could be represented
+                            by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
+                            counts for other elements (e.g., Al or Pt).
+        Outputs:
+            data        A dictionary containing the data we pulled from the Local database.
+                        This object is taken raw from the _pull method.
+            x           A stacked array containing all of the data for all of the factors
+            y           A stacked array containing all of the data for all of the responses
+            x_train     A subset of `x` intended to use as a training set
+            y_train     A subset of `y` intended to use as a training set
+            x_test      A subset of `x` intended to use as a validation set
+            y_test      A subset of `y` intended to use as a validation set
+            lb_ads      The label binarizer used to binarize the adsorbate
+            lb_coord    The label binarizer used to binarize the coordination vector
+        '''
+        # Establish the variables and pull the data from the Local database
+        pulled_factors = ['coordination', 'adsorbate', 'mpid', 'miller']
+        factors = ['coordination']
+        responses = ['energy']
+        data = self._pull(pulled_factors+responses+['symbols'])
+        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
+        # dictionary, except the values will be pre-processed data, not "raw" data.
+        p_data = dict.fromkeys(factors+responses, None)
+
+        # Pre-process the energy
+        p_data['energy'] = np.array(data['energy'])
+        # Pre-process the coordination
+        p_data['coordination'], lb_coord = self._coord2coordcount(data['coordination'])
+
+        # Stack the data to create the outputs
+        x = self._stack(p_data, factors)
+        y = self._stack(p_data, responses)
+
+        # If specified, return the split data and the raw data
+        if self.split:
+            x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                train_size=self.train_size,
+                                                                random_state=self.random_state)
+            return x, y, data, x_train, x_test, y_train, y_test, lb_coord
+        # If we are not splitting the data, then simply returt x, y, and the raw data
+        else:
+            return x, y, data, lb_coord
+
+
     def energy_fr_coordcount_nncoord_ads(self):
         '''
         Pull data according to the following motifs:
@@ -419,3 +468,174 @@ class GASPull(object):
         # If we are not splitting the data, then simply returt x, y, and the raw data
         else:
             return x, y, data, lb_ads, lb_coord
+
+
+    def energy_fr_gcn(self):
+        '''
+        Pull data according to the following motifs:
+            gcn     Generalized Coordination Number for an adsorbate on an alloy.
+                    It is similar to the coordination count, but instead of simply
+                    adding `1` for each neighbor, we add the fractional coordination
+                    for that neighbor (i.e., if that neighbor normally has a CN of 12
+                    and now it has a CN of 6, we assign its fractional coordination as
+                    6/12=0.5). Note that this method has two shortfalls:
+                        1) The fractional coordination of the neighbors is insensitive
+                           to the identity of the missing next-neighbors,
+                           e.g., if a bulk Ag slab atom is normally coordinated
+                           as Ni-Ni-Ga-Ga, then a slab Ag atom that is
+                           coordinated as Ni-Ni-Ga will look the same as
+                           another slab Ag atom that is coordinated as Ni-Ga-Ga.
+                        2) This algorithm does not differentiate the "normal
+                           coordination" of one elemental atom in the bulk from
+                           another. For example:  If an adsorbate coordination
+                           is Ag-Ag and one of those Ag lost all of its neighbors
+                           (i.e., had fractional coordination=0) while the other
+                           Ag lost none (i.e., fractional coordination=1), then
+                           this method would mark the adsorbate's gcn=0+1=1.
+                           This would be the same gcn as a system whose two
+                           Ag atoms had fractional coordinations of 0.5 (each).
+        Outputs:
+            data        A dictionary containing the data we pulled from the Local database.
+                        This object is taken raw from the _pull method.
+            x           A stacked array containing all of the data for all of the factors
+            y           A stacked array containing all of the data for all of the responses
+            x_train     A subset of `x` intended to use as a training set
+            y_train     A subset of `y` intended to use as a training set
+            x_test      A subset of `x` intended to use as a validation set
+            y_test      A subset of `y` intended to use as a validation set
+            lb_ads      The label binarizer used to binarize the adsorbate
+            lb_coord    The label binarizer used to binarize the coordination vector
+        '''
+        # Establish the variables and pull the data from the Local database
+        pulled_factors = ['coordination', 'neighborcoord', 'bulkfwid',
+                          'adsorbate', 'mpid', 'miller']
+        factors = ['gcn']
+        responses = ['energy']
+        data = self._pull(pulled_factors+responses+['symbols'])
+        # Initialize a second dictionary, `p_data`, that will be identical to the `data`
+        # dictionary, except the values will be pre-processed data, not "raw" data.
+        p_data = dict.fromkeys(factors+responses, None)
+
+        # Pre-process the energy
+        p_data['energy'] = np.array(data['energy'])
+
+        # Create a binarizer for the elements we are looking at so that we can use
+        # it to calculate the GCNs
+        lb_coord = preprocessing.LabelBinarizer()
+        lb_coord.fit(np.unique([item for sublist in data['symbols'] for item in sublist
+                                if item != 'C' and item != 'O']))
+        # Determine the maximum coordination of each of the elements in the bulk, c_max.
+        # This will also be used to calculate the GCNs. Note that `cmax` will be a nested
+        # dictionary. The highest level keys are the fwids of the bulks; the second level
+        # keys (which are the first-level values) are the unique elements of that bulk;
+        # and the second-level values are naive coordination numbers (i.e., they treat
+        # all elements the same).
+        pkl_name = './pkls/cmax.pkl'
+        try:
+            # Calculating `cmax` takes a solid amount of time. Let's see if an old,
+            # pickled version of it is lying around before we try calculating it
+            # all over again.
+            with open(pkl_name, 'rb') as fname:
+                cmax = pickle.load(fname)
+        except IOError:
+            with utils.get_aux_db() as aux_db:
+                # `bulks` is a dictionary of all of the bulks we've relaxed, where
+                # the key is the fwid and the value is the ase.Atoms object.
+                bulks = {fwid: mongo_doc_atoms(aux_db.find({'fwid': fwid})[0])
+                         for fwid in np.unique(data['bulkfwid'])}
+            cmax = dict.fromkeys(bulks)
+            for fwid, bulk in bulks.iteritems():
+                # PyMatGen prep-work before we calculate the coordination count
+                # of each atom in the bulk. `neighbor_coords` a dictionary the coordination
+                # numbers for each atom in the bulk, but sorted such that each key
+                # is a different element and each value is a list of coordination numbers
+                # (for each occurence of that element in the bulk).
+                struct = AseAtomsAdaptor.get_structure(bulk)
+                vcf = VoronoiCoordFinder(struct, allow_pathological=True)
+                bulk_symbols = np.unique(bulk.get_chemical_symbols())
+                neighbor_coords = dict.fromkeys(bulk_symbols, [])
+                for i, atom in enumerate(bulk):
+                    # We use a try/except block to address QHull errors. Since we can't
+                    # figure out how to define a QHull error, we put down a blanket
+                    # exception and spit it out so the user will know what happened.
+                    try:
+                        neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
+                        neighbor_atoms = [neighbor_site.species_string
+                                          for neighbor_site in neighbor_sites]
+                        neighbor_coords[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms)))
+                    except Exception as ex:
+                        template = 'An exception of type {0} occurred. Arguments:\n{1!r}'
+                        message = template.format(type(ex).__name__, ex.args)
+                        print(message)
+                        print('We might have gotten a Qhull error at fwid=%s, atom #%s (%s)' \
+                              % (fwid, i, atom.symbol))
+                        # If we get an error, then just put a zero and move on because,
+                        # well, we need to put something.
+                        neighbor_coords[atom.symbol].append(0)
+                # Use `neighbor_coords` to populate `cmax`. We also make it a float
+                # so that we don't have to do it later (i.e., do it up front).
+                cmax[fwid] = {symbol: float(max(neighbor_coord))
+                              for symbol, neighbor_coord in neighbor_coords.iteritems()}
+            # Save our results to a pickle so we don't have to do this again.
+            with open(pkl_name, 'wb') as fname:
+                pickle.dump(cmax, fname)
+
+        # Pre-process the GCNs. But first we initialize and then turn the GCN
+        # array into a float array, since we'll be adding fractional coordination
+        # numbers
+        p_data['gcn'], __lb = self._coord2coordcount(['']*len(data['energy']))
+        p_data['gcn'] = p_data['gcn'].astype(float)
+        for i, coord in enumerate(data['coordination']):
+            # `data` contains the coordinations as strings,
+            # e.g., "[u'W:N-N', u'W:N-N-N']". This indexing removes the outer shell
+            # to leave a W:N-N', u'W:N-N-N
+            neighbor_coords = data['neighborcoord'][i][3:-2]
+            # Split `neighbor_coords` from one string to a list, where each
+            # element corresponds to a different neighbor. Now the form will be
+            # ['W:N-N', 'W:N-N-N']
+            neighbor_coords = neighbor_coords.split('\', u\'')
+            # Take out the pre-labels, leaving a ['N-N', 'N-N-N']. The indexing
+            # of this list is identical to the order-of-appearance within `coord`
+            neighbor_coords = [neighbor_coord.split(':')[1] for neighbor_coord in neighbor_coords]
+            # Calculate and assign the gcn contribution for each neighbor
+            for j, neighbor in enumerate(coord.split('-')):
+                # The classical coordination number of the neighbor (excluding adsorbate)
+                neighbor_cn = len(neighbor_coords[j].split('-'))
+                try:
+                    _cmax = cmax[data['bulkfwid'][i]][neighbor]
+                    # The index of `neighbor`'s element within the coordcount vector
+                    index = self._coord2coordcount([neighbor])[0].tolist()[0].index(1)
+                    try:
+                        # Add the gcn contribution from this neighor.
+                        p_data['gcn'][i][index] += neighbor_cn/_cmax
+                    # If _cmax somehow turns out to be zero, then add a gcn of
+                    # 1 (if the neighbor is coordinated at all)
+                    except ZeroDivisionError:
+                        if neighbor_cn:
+                            p_data['gcn'][i][index] += 1
+                # If the `coord` ends up containing an element that's not
+                # in the bulk (which only happens on edge cases where
+                # PyMatGen fails us), then simply set the neighbor_cn to 1
+                # (if the neighbor is coordinated at all).
+                except KeyError:
+                    if neighbor_cn:
+                        p_data['gcn'][i][index] += 1
+            try:
+                if not i % 100:
+                    print("Pulling out data point #%s for GCN" % i)
+            except ZeroDivisionError:
+                pass
+
+        # Stack the data to create the outputs
+        x = self._stack(p_data, factors)
+        y = self._stack(p_data, responses)
+
+        # If specified, return the split data and the raw data
+        if self.split:
+            x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                train_size=self.train_size,
+                                                                random_state=self.random_state)
+            return x, y, data, x_train, x_test, y_train, y_test, lb_coord
+        # If we are not splitting the data, then simply returt x, y, and the raw data
+        else:
+            return x, y, data, lb_coord
