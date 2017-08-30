@@ -374,6 +374,60 @@ class GASPull(object):
             return x, y, p_docs, lb_ads, lb_coord
 
 
+    def energy_fr_nncoord(self):
+        '''
+        Pull data according to the following motifs:
+            nncoord          The same as coord_count, except we cound the atoms that are
+                            coordinated with the binding atoms' nearest neighbor
+        Outputs:
+            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
+                        the adsorption database. This object is taken raw from the _pull method.
+            x           A stacked array containing all of the data for all of the factors
+            y           A stacked array containing all of the data for all of the responses
+            x_train     A subset of `x` intended to use as a training set
+            y_train     A subset of `y` intended to use as a training set
+            x_test      A subset of `x` intended to use as a validation set
+            y_test      A subset of `y` intended to use as a validation set
+            lb_coord    The label binarizer used to binarize the coordination vector
+        '''
+        # Identify the factors & responses. This will be used to build the outputs.
+        factors = ['nextnearestcoordination']
+        responses = ['energy']
+        # Establish the variables to pull (i.e., `fingerprints`) and pull it from
+        # the database
+        fingerprints = {'nextnearestcoordination': '$processed_data.fp_init.nextnearestcoordination',
+                        'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'energy': '$results.energy'}
+        p_docs = self._pull(fingerprints=fingerprints)
+        # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
+        # so we pull it out into its own key.
+        p_docs['adsorbate'] = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
+
+        # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
+        # dictionary, except the values will be pre-processed such that they may be accepted
+        # and readable by regressors
+        features = dict.fromkeys(factors+responses)
+
+        # Pre-process the energy
+        features['energy'] = np.array(p_docs['energy'])
+        # Pre-process the next nearest coordination counts
+        features['nextnearestcoordination'], lb_nncoord = self._coord2coordcount(p_docs['nextnearestcoordination'])
+
+        # Stack the data to create the outputs
+        x = self._stack(features, factors)
+        y = self._stack(features, responses)
+
+        # If specified, return the features and the p_docs
+        if self.split:
+            x_train, x_test, y_train, y_test = train_test_split(x, y,
+                                                                train_size=self.train_size,
+                                                                random_state=self.random_state)
+            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_nncoord
+        # If we are not splitting the features, then simply returt x, y, and p_docs
+        else:
+            return x, y, p_docs, lb_nncoord
+
+
     # TODO:  Convert to aux db format
     def energy_fr_gcn_ads(self):
         # pylint: disable=too-many-statements, too-many-branches
