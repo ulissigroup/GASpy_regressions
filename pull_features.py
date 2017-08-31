@@ -4,7 +4,22 @@ other scripts may perform data analyses on them.
 
 Note that this script uses the term "factors". Some people may call these "features" or
 "independent variables".
+
+All of the non-hidden methods in this class return the same outputs:
+    x           A dictionary of stacked arrays containing the data for all of the factors.
+                The keys are 'train', 'test', and 'train+test', and they correspond to
+                the training set, test/validation set, and the cumulation of the training/
+                test sets.
+    y           The same as `x`, but for the outputs, not the inputs
+    p_docs      The same as `x`, but the dict values are not np.arrays of data.
+                Instead, they are dictionaries with structures analogous to the
+                `p_docs` returned by `gaspy.utils.get_docs`, i.e., it is a dictionary
+                whose keys are the keys of `fingerprints` and whose values are lists
+                of the results.
+    pp          A dictionary containing the preprocessors used when converting the
+                fingerprints to features. The key is the name of the fingerprint.
 '''
+
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 import pdb
@@ -22,10 +37,10 @@ from gaspy import utils
 from gaspy import defaults
 
 
-class GASPull(object):
+class PullFeatures(object):
     # pylint: disable=too-many-instance-attributes
     def __init__(self,
-                 vasp_settings=None, split=False,
+                 vasp_settings=None,
                  energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
                  train_size=0.75, random_state=42):
@@ -36,8 +51,6 @@ class GASPull(object):
         Inputs:
             vasp_settings       A string of vasp settings. Use the vasp_settings_to_str
                                 function in GAspy
-            split               Boolean that is true if you want to split the data into a
-                                training and test sets
             energy_min          The minimum adsorption energy to pull from the Local DB (eV)
             energy_max          The maximum adsorption energy to pull from the Local DB (eV)
             ads_move_max        The maximum distance that an adsorbate atom may move (angstrom)
@@ -58,7 +71,6 @@ class GASPull(object):
             self.client = client
 
         # Pass along various parameters to use later
-        self.split = split
         self.train_size = train_size
         self.random_state = random_state
         self.vasp_settings = vasp_settings
@@ -87,6 +99,11 @@ class GASPull(object):
 
         Note that `fingerprints` should be mongo queries of parameters that you want
         pulled.
+
+        Output:
+            p_docs  "parsed docs"; a dictionary whose keys are the keys of `fingerprints` and
+                    whose values are lists of the results returned by each query within
+                    `fingerprints`.
         '''
         # It turns out that Python doesn't like `self.*` assigned as defaults.
         # Let's hack it. Note that we use the `default` flag instead of the
@@ -178,6 +195,54 @@ class GASPull(object):
         return np.hstack(data_tup)
 
 
+    def _post_process(self, features, factors, responses, p_docs):
+        '''
+        This method will stack all features into a single vector; stack all of the
+        responses into a single vector, and then split the resulting data into training,
+        testing, and train+test sets.
+
+        Inputs:
+            features    A pre-processed form of `p_docs`, which is a parsed set of mongo
+                        documents whose keys are fingerprint names and values are the processed
+                        values of the fingerprint.
+            factors     A list of strings indicating which of the keys in `features`
+                        should correspond to model factors
+            responses   A list of strings indicating which of the keys in `features`
+                        should correspond to model responses
+            p_docs      The raw `p_docs` returned by the `self._pull` method
+        Outputs:
+            x               A dictionary whose keys are 'train', 'test', and 'train+test'.
+                            The values are stacked numpy arrays of the model inputs.
+            y               A dictionary whose keys are 'train', 'test', and 'train+test'.
+                            The values are stacked numpy arrays of the model responses.
+            split_p_docs    A re-structured version of `p_docs`. Now it is a dictionary
+                            with the same keys as the other outputs. The values have the same
+                            structure as the original `p_docs`.
+        '''
+        # Initialize the outputs
+        x = {'train': None, 'test': None, 'train+test': None}
+        y = {'train': None, 'test': None, 'train+test': None}
+        split_p_docs = {'train': None, 'test': None, 'train+test': None}
+
+        # Stack the p_docs to create the outputs, then split it
+        x['train+test'] = self._stack(features, factors)
+        y['train+test'] = self._stack(features, responses)
+        x['train'], x['test'], y['train'], y['test'], indices_train, indices_test = \
+                train_test_split(x['train+test'], y['train+test'], range(len(x['train+test'])),
+                                 train_size=self.train_size, random_state=self.random_state)
+
+        # Split/re-structure `p_docs`
+        split_p_docs = {'train+test': p_docs,
+                        'train': {fp: [value for i, value in enumerate(values)
+                                       if i in indices_train]
+                                  for fp, values in p_docs.iteritems()},
+                        'test': {fp: [value for i, value in enumerate(values)
+                                      if i in indices_test]
+                                 for fp, values in p_docs.iteritems()}}
+
+        return x, y, split_p_docs
+
+
     def energy_fr_coordcount(self):
         '''
         Pull data according to the following motifs:
@@ -186,16 +251,6 @@ class GASPull(object):
                             For example:  a coordination site of Au-Ag-Ag could be represented
                             by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
                             counts for other elements (e.g., Al or Pt).
-        Outputs:
-            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
-                        the adsorption database. This object is taken raw from the _pull method.
-            x           A stacked array containing all of the data for all of the factors
-            y           A stacked array containing all of the data for all of the responses
-            x_train     A subset of `x` intended to use as a training set
-            y_train     A subset of `y` intended to use as a training set
-            x_test      A subset of `x` intended to use as a validation set
-            y_test      A subset of `y` intended to use as a validation set
-            lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Identify the factors & responses. This will be used to build the outputs.
         factors = ['coordination']
@@ -217,24 +272,16 @@ class GASPull(object):
         # and readable by regressors
         features = dict.fromkeys(factors+responses)
 
+        pp = {}
         # Pre-process the energy
         features['energy'] = np.array(p_docs['energy'])
         # Pre-process the coordination
-        features['coordination'], lb_coord = self._coord2coordcount(p_docs['coordination'])
+        features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
 
-        # Stack the p_docs to create the outputs
-        x = self._stack(features, factors)
-        y = self._stack(features, responses)
+        # Stack, split, and structure the data
+        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
 
-        # If specified, return the features and the p_docs
-        if self.split:
-            x_train, x_test, y_train, y_test = train_test_split(x, y,
-                                                                train_size=self.train_size,
-                                                                random_state=self.random_state)
-            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_coord
-        # If we are not splitting the features, then simply returt x, y, and p_docs
-        else:
-            return x, y, p_docs, lb_ads, lb_coord
+        return x, y, p_docs, pp
 
 
     def energy_fr_coordcount_ads(self):
@@ -246,17 +293,6 @@ class GASPull(object):
                             by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
                             counts for other elements (e.g., Al or Pt).
             ads             A vector of binaries that indicate the type of adsorbate.
-        Outputs:
-            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
-                        the adsorption database. This object is taken raw from the _pull method.
-            x           A stacked array containing all of the data for all of the factors
-            y           A stacked array containing all of the data for all of the responses
-            x_train     A subset of `x` intended to use as a training set
-            y_train     A subset of `y` intended to use as a training set
-            x_test      A subset of `x` intended to use as a validation set
-            y_test      A subset of `y` intended to use as a validation set
-            lb_ads      The label binarizer used to binarize the adsorbate
-            lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Identify the factors & responses. This will be used to build the outputs.
         factors = ['coordination', 'adsorbate']
@@ -278,29 +314,21 @@ class GASPull(object):
         # and readable by regressors
         features = dict.fromkeys(factors+responses)
 
+        pp = {}
         # Pre-process the energy
         features['energy'] = np.array(p_docs['energy'])
         # Pre-process the adsorbate identity via binarizer
         ads = np.unique(p_docs['adsorbate'])
-        lb_ads = preprocessing.LabelBinarizer()
-        lb_ads.fit(ads)
-        features['adsorbate'] = lb_ads.transform(p_docs['adsorbate'])
+        pp['adsorbate'] = preprocessing.LabelBinarizer()
+        pp['adsorbate'].fit(ads)
+        features['adsorbate'] = pp['adsorbate'].transform(p_docs['adsorbate'])
         # Pre-process the coordination
-        features['coordination'], lb_coord = self._coord2coordcount(p_docs['coordination'])
+        features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
 
-        # Stack the p_docs to create the outputs
-        x = self._stack(features, factors)
-        y = self._stack(features, responses)
+        # Stack, split, and structure the data
+        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
 
-        # If specified, return the features and the p_docs
-        if self.split:
-            x_train, x_test, y_train, y_test = train_test_split(x, y,
-                                                                train_size=self.train_size,
-                                                                random_state=self.random_state)
-            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        # If we are not splitting the features, then simply returt x, y, and p_docs
-        else:
-            return x, y, p_docs, lb_ads, lb_coord
+        return x, y, p_docs, pp
 
 
     def energy_fr_coordcount_nncoord_ads(self):
@@ -314,17 +342,6 @@ class GASPull(object):
             nncord          The same as coord_count, except we cound the atoms that are
                             coordinated with the binding atoms' nearest neighbor
             ads             A vector of binaries that indicate the type of adsorbate.
-        Outputs:
-            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
-                        the adsorption database. This object is taken raw from the _pull method.
-            x           A stacked array containing all of the data for all of the factors
-            y           A stacked array containing all of the data for all of the responses
-            x_train     A subset of `x` intended to use as a training set
-            y_train     A subset of `y` intended to use as a training set
-            x_test      A subset of `x` intended to use as a validation set
-            y_test      A subset of `y` intended to use as a validation set
-            lb_ads      The label binarizer used to binarize the adsorbate
-            lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Identify the factors & responses. This will be used to build the outputs.
         factors = ['coordination', 'nextnearestcoordination', 'adsorbate']
@@ -347,31 +364,24 @@ class GASPull(object):
         # and readable by regressors
         features = dict.fromkeys(factors+responses)
 
+        pp = {}
         # Pre-process the energy
         features['energy'] = np.array(p_docs['energy'])
         # Pre-process the adsorbate identity via binarizer
         ads = np.unique(p_docs['adsorbate'])
-        lb_ads = preprocessing.LabelBinarizer()
-        lb_ads.fit(ads)
-        features['adsorbate'] = lb_ads.transform(p_docs['adsorbate'])
+        pp['adsorbate'] = preprocessing.LabelBinarizer()
+        pp['adsorbate'].fit(ads)
+        features['adsorbate'] = pp['adsorbate'].transform(p_docs['adsorbate'])
         # Pre-process the coordination counts
-        features['coordination'], lb_coord = self._coord2coordcount(p_docs['coordination'])
+        features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
         # Pre-process the next nearest coordination counts
-        features['nextnearestcoordination'], lb_nncoord = self._coord2coordcount(p_docs['nextnearestcoordination'])
+        features['nextnearestcoordination'], pp['nextnearestcoordination'] = \
+                self._coord2coordcount(p_docs['nextnearestcoordination'])
 
-        # Stack the data to create the outputs
-        x = self._stack(features, factors)
-        y = self._stack(features, responses)
+        # Stack, split, and structure the data
+        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
 
-        # If specified, return the features and the p_docs
-        if self.split:
-            x_train, x_test, y_train, y_test = train_test_split(x, y,
-                                                                train_size=self.train_size,
-                                                                random_state=self.random_state)
-            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        # If we are not splitting the features, then simply returt x, y, and p_docs
-        else:
-            return x, y, p_docs, lb_ads, lb_coord
+        return x, y, p_docs, pp
 
 
     def energy_fr_nncoord(self):
@@ -379,16 +389,6 @@ class GASPull(object):
         Pull data according to the following motifs:
             nncoord          The same as coord_count, except we cound the atoms that are
                             coordinated with the binding atoms' nearest neighbor
-        Outputs:
-            p_docs      "parsed mongo docs"; a dictionary containing the data we pulled from
-                        the adsorption database. This object is taken raw from the _pull method.
-            x           A stacked array containing all of the data for all of the factors
-            y           A stacked array containing all of the data for all of the responses
-            x_train     A subset of `x` intended to use as a training set
-            y_train     A subset of `y` intended to use as a training set
-            x_test      A subset of `x` intended to use as a validation set
-            y_test      A subset of `y` intended to use as a validation set
-            lb_coord    The label binarizer used to binarize the coordination vector
         '''
         # Identify the factors & responses. This will be used to build the outputs.
         factors = ['nextnearestcoordination']
@@ -408,27 +408,20 @@ class GASPull(object):
         # and readable by regressors
         features = dict.fromkeys(factors+responses)
 
+        pp = {}
         # Pre-process the energy
         features['energy'] = np.array(p_docs['energy'])
         # Pre-process the next nearest coordination counts
-        features['nextnearestcoordination'], lb_nncoord = self._coord2coordcount(p_docs['nextnearestcoordination'])
+        features['nextnearestcoordination'], pp['nextnearestcoordination'] = \
+                self._coord2coordcount(p_docs['nextnearestcoordination'])
 
-        # Stack the data to create the outputs
-        x = self._stack(features, factors)
-        y = self._stack(features, responses)
+        # Stack, split, and structure the data
+        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
 
-        # If specified, return the features and the p_docs
-        if self.split:
-            x_train, x_test, y_train, y_test = train_test_split(x, y,
-                                                                train_size=self.train_size,
-                                                                random_state=self.random_state)
-            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_nncoord
-        # If we are not splitting the features, then simply returt x, y, and p_docs
-        else:
-            return x, y, p_docs, lb_nncoord
+        return x, y, p_docs, pp
 
 
-    # TODO:  Convert to aux db format
+    # TODO:  Convert to aux db format... and pretty much re-do it
     def energy_fr_gcn_ads(self):
         # pylint: disable=too-many-statements, too-many-branches
         '''
@@ -464,8 +457,8 @@ class GASPull(object):
             y_train     A subset of `y` intended to use as a training set
             x_test      A subset of `x` intended to use as a validation set
             y_test      A subset of `y` intended to use as a validation set
-            lb_ads      The label binarizer used to binarize the adsorbate
-            lb_coord    The label binarizer used to binarize the coordination vector
+            pp          A dictionary containing the preprocessors used when converting the
+                        fingerprints to features. The key is the name of the fingerprint.
         '''
         # Identify the factors & responses. This will be used to build the outputs.
         factors = ['gcn', 'adsorbate']
@@ -488,17 +481,18 @@ class GASPull(object):
         # dictionary, except the values will be pre-processed p_docs, not "raw" p_docs.
         features = dict.fromkeys(factors+responses, None)
 
+        pp = {}
         # Pre-process the energy
         features['energy'] = np.array(p_docs['energy'])
         # Pre-process the adsorbate identity via binarizer
         ads = np.unique(p_docs['adsorbate'])
-        lb_ads = preprocessing.LabelBinarizer()
-        lb_ads.fit(ads)
-        features['adsorbate'] = lb_ads.transform(p_docs['adsorbate'])
+        pp['adsorbate'] = preprocessing.LabelBinarizer()
+        pp['adsorbate'].fit(ads)
+        features['adsorbate'] = pp['adsorbate'].transform(p_docs['adsorbate'])
 
         # Create a binarizer for the elements we are looking at so that we can use
         # it to calculate the GCNs
-        lb_coord = self._coord2coordcount([''])[1]
+        pp['coordination'] = self._coord2coordcount([''])[1]
         # Determine the maximum coordination of each of the elements in the bulk, c_max.
         # This will also be used to calculate the GCNs. Note that `cmax` will be a nested
         # dictionary. The highest level keys are the fwids of the bulks; the second level
@@ -529,8 +523,8 @@ class GASPull(object):
                     neighbor_sites = vcf.get_coordinated_sites(i, 0.8)
                     neighbor_atoms = [neighbor_site.species_string
                                       for neighbor_site in neighbor_sites]
-                    neighbor_coords[atom.symbol].append(np.sum(lb_coord.transform(neighbor_atoms)))
-                except Exception as ex:
+                    neighbor_coords[atom.symbol].append(np.sum(pp['coordination'].transform(neighbor_atoms)))
+                except Exception as ex:         # pylint: disable=broad-except
                     template = 'An exception of type {0} occurred. Arguments:\n{1!r}'
                     message = template.format(type(ex).__name__, ex.args)
                     print(message)
@@ -584,16 +578,7 @@ class GASPull(object):
             except ZeroDivisionError:
                 pass
 
-        # Stack the p_docs to create the outputs
-        x = self._stack(features, factors)
-        y = self._stack(features, responses)
+        # Stack, split, and structure the data
+        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
 
-        # If specified, return the features and the p_docs
-        if self.split:
-            x_train, x_test, y_train, y_test = train_test_split(x, y,
-                                                                train_size=self.train_size,
-                                                                random_state=self.random_state)
-            return x, y, p_docs, x_train, x_test, y_train, y_test, lb_ads, lb_coord
-        # If we are not splitting the features, then simply returt x, y, and p_docs
-        else:
-            return x, y, p_docs, lb_ads, lb_coord
+        return x, y, p_docs, pp
