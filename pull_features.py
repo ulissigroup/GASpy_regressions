@@ -397,6 +397,7 @@ class PullFeatures(object):
         # the database
         fingerprints = {'nextnearestcoordination': '$processed_data.fp_init.nextnearestcoordination',
                         'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'coordination': '$processed_data.fp_final.coordination',
                         'energy': '$results.energy'}
         p_docs = self._pull(fingerprints=fingerprints)
         # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
