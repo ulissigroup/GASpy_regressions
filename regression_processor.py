@@ -79,19 +79,15 @@ class RegressionProcessor(object):
             # create `block_list`
             block_values = []
             for block in blocks:
-                block_values.append(np.unique(self.p_docs[block]).tolist())
-            self.block_list = ([block for block in itertools.product(*blocks)])
+                block_values.append(np.unique(self.p_docs['no_block']['train+test'][block]).tolist())
+            self.block_list = [block for block in itertools.product(*block_values)]
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
             datasets = dict.fromkeys(self.x)    # e.g., ['train', 'test', 'train+test']
             for block in self.block_list:
-                self.x[block] = dict.fromkeys(datasets)
-                self.y[block] = dict.fromkeys(datasets)
-                self.p_docs[block] = dict.fromkeys(datasets)
-                for dataset in datasets:
-                    self.x[block][dataset] = self._filter(x[dataset], blocks, block)
-                    self.y[block][dataset] = self._filter(y[dataset], blocks, block)
-                    self.p_docs[block][dataset] = self._filter(p_docs[dataset], blocks, block)
+                self.x[block] = self._filter(self.x['no_block'], blocks, block)
+                self.y[block] = self._filter(self.y['no_block'], blocks, block)
+                self.p_docs[block] = self._filter(self.p_docs['no_block'], blocks, block)
 
         # If there is no blocking, then set `block_list` to ['no_block'], which will cause this
         # class' methods to act on the entire dataset pulled by `PullFeatures`.
@@ -102,9 +98,14 @@ class RegressionProcessor(object):
     def _filter(self, data, blocks, block):
         '''
         Filter the `data` according to the `block` that it belongs to.
+        Note that the algorithm to create the `fdata` intermediary object is... complicated.
+        I hurt my brain writing it. Feel free to pick it apart to make it easier to read.
 
         Inputs:
-            data        A numpy array of data that is yielded by `PullFeatures`
+            data        A dictionary whose keys are 'train+test', 'train', and 'test'.
+                        The values are numpy arrays of data that are yielded by `PullFeatures`...
+                        or they are dictionaries of parsed mongo data are also yielded by
+                        `PullFeatures`
             blocks      A list of the names of the fingerprints that we are blocking on,
                         e.g., ['adsorbate', 'mpid']
             block       A tuple of the values of the fingerprints values that we are blocking on,
@@ -114,9 +115,32 @@ class RegressionProcessor(object):
             filtered_data   The subset of `data` whose fingerprint values match those supplied
                             in `block`
         '''
-        filtered_data = [datum for i, datum in enumerate(data)
-                         if all([fp_value == self.p_docs['no_block'][blocks[j]][i]
+        # Initialize output
+        filtered_data = dict.fromkeys(data)
+        # Find the type of the values of `data` so that we treat it correctly
+        dtype = type(data.values()[0])
+
+        # If `_data` is an np.array, then treat it as such. This probably means
+        # that `_data` is either `x` or `y`
+        if dtype == type(np.array([])):
+            for dataset, _data in data.iteritems():
+                fdata = [datum for i, datum in enumerate(_data)
+                         if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
                                  for j, fp_value in enumerate(block)])]
+                # Convert to np.array so that it can be accepted by most regressors
+                filtered_data[dataset] = np.array(fdata)
+
+        # If `_data` is a dict, then we need to loop through each element. This
+        # probably means that `_data` is `p_docs`.
+        elif dtype == dict:
+            for dataset, _data in data.iteritems():
+                filtered_data[dataset] = dict.fromkeys(_data)
+                for p_doc_key, __data in _data.iteritems():
+                    fdata = [datum for i, datum in enumerate(__data)
+                             if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
+                                     for j, fp_value in enumerate(block)])]
+                    filtered_data[dataset][p_doc_key] = fdata
+
         return filtered_data
 
 
@@ -165,7 +189,7 @@ class RegressionProcessor(object):
             models      It will be a TPOTRegressor.fitted_pipeline_ object
         '''
         # It turns out TPOT works exactly as SKLearn does!
-        models, errors, rmses = self.sk_regressor(model)
+        models, rmses, errors = self.sk_regressor(model)
 
         # All we need to do is to pull out the fitted pipelines from the standard
         # TPOT objects
