@@ -124,6 +124,9 @@ class PullFeatures(object):
         if vasp_settings == 'default':
             vasp_settings = self.vasp_settings
 
+        # Make sure that we are storing the mongo ID number in all of our `p_docs`
+        fingerprints['mongo_id'] = '$_id'
+
         return utils.get_docs(self.client, 'adsorption', fingerprints,
                               adsorbates=None, calc_settings=None,
                               vasp_settings=vasp_settings,
