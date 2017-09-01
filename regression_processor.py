@@ -4,16 +4,16 @@ Each of the non-hidden methods are meant to be used the same way.
 
 Inputs:     Changes depending on the method.
 Outputs:
-    models  A dictionary whose keys are the block ('no_block' if there is no blocking).
-            The values are the model object. The type of model object varies, and it
-            depends on the method called.
-    rmses   A nested dictionary whose first set of keys are the block ('no_block' if there
-            is no blocking). The second set of keys are the dataset (i.e., 'train',
-            'test', or 'train+test'. The values of the sub-dictionary are the
-            root-mean-squared-error of the model for the corresponding block
-            and dataset.
-    errors  The same as `rmses`, but it returns an np.array of errors instead of a
-            float of RMSE values.
+    regressors  A dictionary whose keys are the block ('no_block' if there is no blocking).
+                The values are the model object. The type of model object varies, and it
+                depends on the method called.
+    rmses       A nested dictionary whose first set of keys are the block ('no_block' if there
+                is no blocking). The second set of keys are the dataset (i.e., 'train',
+                'test', or 'train+test'. The values of the sub-dictionary are the
+                root-mean-squared-error of the model for the corresponding block
+                and dataset.
+    errors      The same as `rmses`, but it returns an np.array of errors instead of a
+                float of RMSE values.
 '''
 
 import pdb
@@ -41,10 +41,9 @@ class RegressionProcessor(object):
             kwargs      Any arguments that the user may want to pass to `PullFeatures`,
                         such as `vasp_settings`.
         Resulting attributes:
-            x           A dictionary of stacked arrays containing the data for all of the factors.
-                        The keys are 'train', 'test', and 'train+test', and they correspond to
-                        the training set, test/validation set, and the cumulation of the training/
-                        test sets.
+            x           A nested dictionary whose first set of keys are the blocks and whose
+                        second seyt of keys are 'train', 'test', and 'train+test'. The values
+                        are stacked arrays containing the data for all of the factors.
             y           The same as `x`, but for the outputs, not the inputs
             p_docs      The same as `x`, but the dict values are not np.arrays of data.
                         Instead, they are dictionaries with structures analogous to the
@@ -144,16 +143,27 @@ class RegressionProcessor(object):
         return filtered_data
 
 
-    def sk_regressor(self, model):
+    def sk_regressor(self, regressor, x_dict=None, y_dict=None):
         '''
-        This method will assume that the model object you are passing it is an SKLearn
+        This method will assume that the regressor object you are passing it is an SKLearn
         type object, and will thus have `fit` and `predict` methods.
 
+        Inputs:
+            regressor   An SKLearn-type regressor object (e.g., GaussianProcessRegressor)
+            x_dict      The same thing as `self.x`, but the user may specify something
+                        to use instead of `self.x`.
+            y_dict      The same thing as `self.x`, but the user may specify something
+                        to use instead of `self.x`.
         Output:
             models  The values within `models` will be the same types as the input
-                    `model`. So if the user supplies a GaussianProcessRegressor type
-                    model, then that's what comes out.
+                    `regressor`. So if the user supplies a GaussianProcessRegressor type
+                    regressor, then that's what comes out.
         '''
+        # Set defaults
+        if not x_dict:
+            x_dict = self.x
+        if not y_dict:
+            y_dict = self.y
         # Initialize the outputs
         models = dict.fromkeys(self.block_list)
         rmses = dict.fromkeys(self.block_list)
@@ -161,17 +171,16 @@ class RegressionProcessor(object):
 
         for block in self.block_list:
             # Initialize some more structuring for the outputs
-            rmses[block] = dict.fromkeys(self.x[block])
-            errors[block] = dict.fromkeys(self.x[block])
-            # Copy the model template and perform the regression
-            models[block] = copy.deepcopy(model)
-            models[block].fit(self.x[block]['train'], self.y[block]['train'])
+            rmses[block] = dict.fromkeys(x_dict[block])
+            errors[block] = dict.fromkeys(x_dict[block])
+            # Copy the regressor template and perform the regression
+            models[block] = copy.deepcopy(regressor)
+            models[block].fit(x_dict[block]['train'], y_dict[block]['train'])
 
             # Post-process the results for each set of training, testing, and
             # train+test data
-            for dataset in self.x[block].keys():
-                y = self.y[block][dataset]
-                y_hat = models[block].predict(self.x[block][dataset])
+            for dataset, y in y_dict[block].iteritems():
+                y_hat = models[block].predict(x_dict[block][dataset])
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
                 errors[block][dataset] = y_hat - y
@@ -179,17 +188,28 @@ class RegressionProcessor(object):
         return models, rmses, errors
 
 
-    def tpot(self, model):
+    def tpot(self, regressor, x_dict=None, y_dict=None):
         '''
-        This method will assume that the model object you are passing it is a TPOT model
+        This method will assume that the regressor object you are passing it is a TPOT regressor
         type object, and will thus have `fit` and `predict` methods. And it will need
         to be modified in order for it to be pickled.
 
+        Inputs:
+            regressor   An TPOTRegressor object
+            x_dict      The same thing as `self.x`, but the user may specify something
+                        to use instead of `self.x`.
+            y_dict      The same thing as `self.x`, but the user may specify something
+                        to use instead of `self.x`.
         Output:
             models      It will be a TPOTRegressor.fitted_pipeline_ object
         '''
+        # Set defaults
+        if not x_dict:
+            x_dict = self.x
+        if not y_dict:
+            y_dict = self.y
         # It turns out TPOT works exactly as SKLearn does!
-        models, rmses, errors = self.sk_regressor(model)
+        models, rmses, errors = self.sk_regressor(regressor)
 
         # All we need to do is to pull out the fitted pipelines from the standard
         # TPOT objects
@@ -218,17 +238,16 @@ class RegressionProcessor(object):
 
         for block in self.block_list:
             # Initialize some more structuring for the outputs
-            rmses[block] = dict.fromkeys(self.x[block])
-            errors[block] = dict.fromkeys(self.x[block])
+            rmses[block] = dict.fromkeys(x_dict[block])
+            errors[block] = dict.fromkeys(x_dict[block])
             # Perform the regression
-            models[block] = alamopy.doalamo(self.x[block]['train'], self.y[block]['train'],
-                                            self.x[block]['test'], self.y[block]['test'],
+            models[block] = alamopy.doalamo(x_dict[block]['train'], y_dict[block]['train'],
+                                            x_dict[block]['test'], y_dict[block]['test'],
                                             **kwargs)
 
             # Post-process the results for each set of training, testing, and
             # train+test data
-            for dataset in self.x[block].keys():
-                y = self.y[block][dataset]
+            for dataset, y in y_dict[block].iteritems():
                 y_hat = 'foo'
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
@@ -237,52 +256,78 @@ class RegressionProcessor(object):
         return models, rmses, errors
 
 
-    # TODO:  Finish this. The inner and outer modeling is done, but we still need to package them
-    def hierarchical_regression(self, outer_method, outer_model, inner_method, inner_model):
+    def hierarchical(self, outer_models, outer_rmses, outer_errors,
+                     inner_method, inner_regressor):
         '''
         This method accepts the results of many of the other methods of this class and
         then tries to fit another model to regress the subsequent erros of the original
-        model.
+        model. Note that this method assumes that you use the same blocking structure
+        for both the inner and the outer methods, and that you also use the same GASpy_DB
+        snapshot.
 
         Inputs:
-            outer_method    The `Regress` method to be used to create the outer model
-            outer_model     The `model` object that should be used by the outer model
+            outer_models    The `models` for the outer model
+            outer_rmses     The `rmses` for the outer model
+            outer_errors    The `errors` for the outer model
             inner_method    The `Regress` method to be used to create the inner model
-            inner_model     The `model` object that should be used by the inner model
+            inner_regressor The regressing object that should be used by the inner model
         Outputs:
-            Identical to the standard outputs of the other methods in this class, but
-            all have additional keys:  'outer_model' and 'inner_model'. The values in
-            these keys are the standard outputs of the outer_model and inner model
-            (respectively).
+            models  A function that accepts the input to the outer model and the input
+                    to the inner model to make a final prediction. All inputs should
+                    probably be np.arrays. The outputs will probably np.arrays.
+            rmses   This will be the same as "normal", but it will have two additional
+                    keys:  'inner_model' and 'outer_model'. The subsequent values
+                    will be identical to a normal `rmses` object, but specific to
+                    either the inner or outer model.
+            errors  Same as `rmses`, but for the errors instead
         '''
         # Initialize the outputs
-        models = {}
-        rmses = {}
-        errors = {}
-        models['inner_model'] = dict.fromkeys(self.block_list)
-        rmses['inner_model'] = dict.fromkeys(self.block_list)
-        error['inner_model'] = dict.fromkeys(self.block_list)
-        # Call the outer method and store the results to the outputs
-        outer_model, outer_rmses, outer_errors = outer_method(outer_model)
-        models['outer_model'] = outer_model
+        models = dict.fromkeys(self.block_list)
+        rmses = dict.fromkeys(self.block_list)
+        errors = dict.fromkeys(self.block_list)
+
+        # Pull the outer model information
+        models['outer_model'] = outer_models
         rmses['outer_model'] = outer_rmses
         errors['outer_model'] = outer_errors
 
-        for block in self.block_list:
-            # Initialize some more structuring for the outputs
-            rmses['inner_model'][block] = dict.fromkeys(self.x[block])
-            errors['inner_model'][block] = dict.fromkeys(self.x[block])
-            # Copy the model template and perform the regression
-            models['inner_model'][block] = copy.deepcopy(model)
-            models['inner_model'][block].fit(self.x[block]['train'], outer_errors[block]['train'])
+        # Pull the inner model information
+        models['inner_model'], rmses['inner_model'], errors['inner_model'] = \
+                getattr(self, inner_method)(inner_regressor,
+                                            y_dict=errors['outer_model'])
 
-            # Post-process the results for each set of training, testing, and
-            # train+test data
-            for dataset in self.x[block].keys():
-                y = outer_errors[block][dataset]
-                y_hat = models['inner_model'][block].predict(self.x[block][dataset])
+        # Compile the outputs for the hierarchical model
+        for block in self.block_list:
+            # Initialize the sub-structure
+            rmses[block] = dict.fromkeys(self.y[block])
+            errors[block] = dict.fromkeys(self.y[block])
+            # Calculate the rmses and the errors
+            for dataset, y in self.y[block].iteritems():
+                y_hat = y + errors['outer_model'][block][dataset] \
+                        - models['inner_model'][block].predict(self.x[block][dataset])
                 mse = metrics.mean_squared_error(y, y_hat)
-                rmses['inner_model'][block][dataset] = math.sqrt(mse)
-                errors['inner_model'][block][dataset] = y_hat - y
+                rmses[block][dataset] = math.sqrt(mse)
+                errors[block][dataset] = y_hat - y
+
+            # Create a function that will serve as the hierarchical model
+            def __h_model(x_outer, x_inner):
+                '''
+                Inputs:
+                    x_outer An np.array that the outer model may accept directly in order
+                            to make its prediction of the final solution
+                    x_inner An np.array that the inner model may accept directly in order
+                            to make its prediction of the outer model's error
+                Outputs:
+                    y_hat   An np.array that represents this hierarchical model's
+                            final estimate of the solution
+                '''
+                # The outer model's estimate of the solution
+                y_outer = models['outer_model'][block].predict(x_outer)
+                # The inner model's estimate of the outer model's error
+                y_inner = models['inner_model'][block].predict(x_inner)
+                # The hierarchical model's estimate of the solution
+                y_hat = y_outer - y_inner
+                return y_hat
+            models[block] = __h_model
 
         return models, rmses, errors
