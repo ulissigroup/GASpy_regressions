@@ -26,6 +26,7 @@ import pdb
 import warnings
 import sys
 import pickle
+import copy
 import numpy as np
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
@@ -224,24 +225,23 @@ class PullFeatures(object):
         '''
         # Initialize the outputs
         x = {'train': None, 'test': None, 'train+test': None}
-        y = {'train': None, 'test': None, 'train+test': None}
-        split_p_docs = {'train': None, 'test': None, 'train+test': None}
+        y = copy.deepcopy(x)
+        split_p_docs = copy.deepcopy(x)
 
-        # Stack the p_docs to create the outputs, then split it
-        x['train+test'] = self._stack(features, factors)
+        # Stack p_docs to create the inputs, then normalize them
+        x['train+test'] = preprocessing.normalize(self._stack(features, factors), axis=0)
+        # Stack p_docs to create the outputs
         y['train+test'] = self._stack(features, responses)
+        # Split the inputs and outputs. We also pull out indices for splitting so that we
+        # can split `p_docs` later
         x['train'], x['test'], y['train'], y['test'], indices_train, indices_test = \
                 train_test_split(x['train+test'], y['train+test'], range(len(x['train+test'])),
                                  train_size=self.train_size, random_state=self.random_state)
 
         # Split/re-structure `p_docs`
         split_p_docs = {'train+test': p_docs,
-                        'train': {fp: [value for i, value in enumerate(values)
-                                       if i in indices_train]
-                                  for fp, values in p_docs.iteritems()},
-                        'test': {fp: [value for i, value in enumerate(values)
-                                      if i in indices_test]
-                                 for fp, values in p_docs.iteritems()}}
+                        'train': {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()},
+                        'test': {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()},}
 
         return x, y, split_p_docs
 
@@ -387,11 +387,62 @@ class PullFeatures(object):
         return x, y, p_docs, pp
 
 
+    def energy_fr_coordcount_nncoord(self):
+        '''
+        Pull data according to the following motifs:
+            coord_count     A vector of ordered integers. Each integer represents the number
+                            of atoms of an element that are coordinated with the adsorbate.
+                            For example:  a coordination site of Au-Ag-Ag could be represented
+                            by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
+                            counts for other elements (e.g., Al or Pt).
+            nncord          The same as coord_count, except we cound the atoms that are
+                            coordinated with the binding atoms' nearest neighbor
+        '''
+        # Identify the factors & responses. This will be used to build the outputs.
+        factors = ['coordination', 'nextnearestcoordination']
+        responses = ['energy']
+        # Establish the variables to pull (i.e., `fingerprints`) and pull it from
+        # the database
+        fingerprints = {'mpid': '$processed_data.calculation_info.mpid',
+                        'miller': '$processed_data.calculation_info.miller',
+                        'top': '$processed_data.calculation_info.top',
+                        'coordination': '$processed_data.fp_final.coordination',
+                        'nextnearestcoordination': '$processed_data.fp_final.nextnearestcoordination',
+                        'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'energy': '$results.energy'}
+        p_docs = self._pull(fingerprints=fingerprints)
+        # `adsorbates` returns a list of adsorbates. We're only looking at one right now,
+        # so we pull it out into its own key.
+        p_docs['adsorbate'] = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
+
+        # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
+        # dictionary, except the values will be pre-processed such that they may be accepted
+        # and readable by regressors
+        features = dict.fromkeys(factors+responses)
+
+        pp = {}
+        # Pre-process the energy
+        features['energy'] = np.array(p_docs['energy'])
+        # Pre-process the coordination counts
+        features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
+        # Pre-process the next nearest coordination counts.
+        # Then Remove the coordination, since it's redundant.
+        features['nextnearestcoordination'], pp['nextnearestcoordination'] = \
+                self._coord2coordcount(p_docs['nextnearestcoordination'])
+        features['nextnearestcoordination'] = \
+                features['nextnearestcoordination']-features['coordination']
+
+        # Stack, split, and structure the data
+        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+
+        return x, y, p_docs, pp
+
+
     def energy_fr_nncoord(self):
         '''
         Pull data according to the following motifs:
-            nncoord          The same as coord_count, except we cound the atoms that are
-                            coordinated with the binding atoms' nearest neighbor
+            nncoord     The same as coord_count, except we count the atoms that are
+                        coordinated with the binding atoms' nearest neighbor
         '''
         # Identify the factors & responses. This will be used to build the outputs.
         factors = ['nextnearestcoordination']
