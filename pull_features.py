@@ -378,8 +378,11 @@ class PullFeatures(object):
         # Pre-process the coordination counts
         features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
         # Pre-process the next nearest coordination counts
+        # Then Remove the coordination, since it's redundant.
         features['nextnearestcoordination'], pp['nextnearestcoordination'] = \
                 self._coord2coordcount(p_docs['nextnearestcoordination'])
+        features['nextnearestcoordination'] = \
+                features['nextnearestcoordination'] - features['coordination']
 
         # Stack, split, and structure the data
         x, y, p_docs = self._post_process(features, factors, responses, p_docs)
@@ -430,7 +433,7 @@ class PullFeatures(object):
         features['nextnearestcoordination'], pp['nextnearestcoordination'] = \
                 self._coord2coordcount(p_docs['nextnearestcoordination'])
         features['nextnearestcoordination'] = \
-                features['nextnearestcoordination']-features['coordination']
+                features['nextnearestcoordination'] - features['coordination']
 
         # Stack, split, and structure the data
         x, y, p_docs = self._post_process(features, factors, responses, p_docs)
@@ -461,14 +464,20 @@ class PullFeatures(object):
         # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
         # dictionary, except the values will be pre-processed such that they may be accepted
         # and readable by regressors
-        features = dict.fromkeys(factors+responses)
+        features = dict.fromkeys(factors+responses+['coordination'])
 
         pp = {}
         # Pre-process the energy
         features['energy'] = np.array(p_docs['energy'])
+        # Pre-process the coordination counts for the sole purpose of removing
+        # them from the nncoord vector
+        features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
         # Pre-process the next nearest coordination counts
+        # Then Remove the coordination, since it's redundant.
         features['nextnearestcoordination'], pp['nextnearestcoordination'] = \
                 self._coord2coordcount(p_docs['nextnearestcoordination'])
+        features['nextnearestcoordination'] = \
+                features['nextnearestcoordination'] - features['coordination']
 
         # Stack, split, and structure the data
         x, y, p_docs = self._post_process(features, factors, responses, p_docs)
