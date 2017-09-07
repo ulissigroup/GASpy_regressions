@@ -50,6 +50,7 @@ class RegressionProcessor(object):
                         `p_docs` returned by `gaspy.utils.get_docs`, i.e., it is a dictionary
                         whose keys are the keys of `fingerprints` and whose values are lists
                         of the results.
+            puller      The instance of the `PullFeatures` class used to... pull features.
             pp          A dict of the preprocessor used by `PullFeatures` to help turn the
                         fingerprints into the features.
             block_list  A list of tuples. Each tuple represents a different block, and
@@ -66,10 +67,11 @@ class RegressionProcessor(object):
         self.x = {}
         self.y = {}
         self.p_docs = {}
+        self.blocks = blocks
         # Pull out the features, and then assign them to the class attributes
-        puller = PullFeatures(**kwargs)
+        self.puller = PullFeatures(**kwargs)
         self.x['no_block'], self.y['no_block'], self.p_docs['no_block'], self.pp = \
-                getattr(puller, feature_set)()
+                getattr(self.puller, feature_set)()
 
         if blocks:
             # `block_values` is a list of sublists, where each sublist contains all of the unique
@@ -82,7 +84,6 @@ class RegressionProcessor(object):
             self.block_list = [block for block in itertools.product(*block_values)]
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
-            datasets = dict.fromkeys(self.x)    # e.g., ['train', 'test', 'train+test']
             for block in self.block_list:
                 self.x[block] = self._filter(self.x['no_block'], blocks, block)
                 self.y[block] = self._filter(self.y['no_block'], blocks, block)
@@ -123,9 +124,7 @@ class RegressionProcessor(object):
         # that `_data` is either `x` or `y`
         if dtype == type(np.array([])):
             for dataset, _data in data.iteritems():
-                fdata = [datum for i, datum in enumerate(_data)
-                         if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
-                                 for j, fp_value in enumerate(block)])]
+                fdata = [datum for i, datum in enumerate(_data) if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i] for j, fp_value in enumerate(block)])]
                 # Convert to np.array so that it can be accepted by most regressors
                 filtered_data[dataset] = np.array(fdata)
 
@@ -152,8 +151,8 @@ class RegressionProcessor(object):
             regressor   An SKLearn-type regressor object (e.g., GaussianProcessRegressor)
             x_dict      The same thing as `self.x`, but the user may specify something
                         to use instead of `self.x`.
-            y_dict      The same thing as `self.x`, but the user may specify something
-                        to use instead of `self.x`.
+            y_dict      The same thing as `self.y`, but the user may specify something
+                        to use instead of `self.y`.
         Output:
             models  The values within `models` will be the same types as the input
                     `regressor`. So if the user supplies a GaussianProcessRegressor type
@@ -198,8 +197,8 @@ class RegressionProcessor(object):
             regressor   An TPOTRegressor object
             x_dict      The same thing as `self.x`, but the user may specify something
                         to use instead of `self.x`.
-            y_dict      The same thing as `self.x`, but the user may specify something
-                        to use instead of `self.x`.
+            y_dict      The same thing as `self.y`, but the user may specify something
+                        to use instead of `self.y`.
         Output:
             models      It will be a TPOTRegressor.fitted_pipeline_ object
         '''
@@ -208,9 +207,9 @@ class RegressionProcessor(object):
             x_dict = self.x
         if not y_dict:
             y_dict = self.y
-        # It turns out TPOT works exactly as SKLearn does!
-        models, rmses, errors = self.sk_regressor(regressor)
 
+        # It turns out TPOT works exactly as SKLearn does!
+        models, rmses, errors = self.sk_regressor(regressor, x_dict=x_dict, y_dict=y_dict)
         # All we need to do is to pull out the fitted pipelines from the standard
         # TPOT objects
         for block in self.block_list:
@@ -256,8 +255,10 @@ class RegressionProcessor(object):
         return models, rmses, errors
 
 
+    # TODO:  Unlike the rest of the information, we end up losing inner_x.
+    # We should eventually save it somehow.
     def hierarchical(self, outer_models, outer_rmses, outer_errors,
-                     inner_method, inner_regressor):
+                     inner_feature_set, inner_method, inner_regressor):
         '''
         This method accepts the results of many of the other methods of this class and
         then tries to fit another model to regress the subsequent erros of the original
@@ -266,11 +267,12 @@ class RegressionProcessor(object):
         snapshot.
 
         Inputs:
-            outer_models    The `models` for the outer model
-            outer_rmses     The `rmses` for the outer model
-            outer_errors    The `errors` for the outer model
-            inner_method    The `Regress` method to be used to create the inner model
-            inner_regressor The regressing object that should be used by the inner model
+            outer_models        The `models` for the outer model
+            outer_rmses         The `rmses` for the outer model
+            outer_errors        The `errors` for the outer model
+            inner_feature_set   A string corresponding to the feature set for the inner model
+            inner_method        The `Regress` method to be used to create the inner model
+            inner_regressor     The regressing object that should be used by the inner model
         Outputs:
             models  A function that accepts the input to the outer model and the input
                     to the inner model to make a final prediction. All inputs should
@@ -285,15 +287,35 @@ class RegressionProcessor(object):
         models = dict.fromkeys(self.block_list)
         rmses = dict.fromkeys(self.block_list)
         errors = dict.fromkeys(self.block_list)
-
-        # Pull the outer model information
+        # Store the outer model information
         models['outer_model'] = outer_models
         rmses['outer_model'] = outer_rmses
         errors['outer_model'] = outer_errors
 
-        # Pull the inner model information
+        # Initialize/pull the information for the inner feature set
+        inner_x = {}
+        inner_p_docs = {}
+        inner_x['no_block'], _, inner_p_docs['no_block'], inner_pp \
+                = getattr(self.puller, inner_feature_set)()
+        # Filter the information for the inner feature set information
+        if len(self.block_list) != 1:    # No need to filter if our only block is 'no_block'
+            for block in self.block_list:
+                inner_x[block] = self._filter(inner_x['no_block'], self.blocks, block)
+                inner_p_docs[block] = self._filter(inner_p_docs['no_block'], self.blocks, block)
+        # Add inner-feature-set information to the class attributes
+        for block in self.block_list:
+            for dataset, new_p_docs in inner_p_docs[block].iteritems():
+                for fp_name, fp_value in new_p_docs.iteritems():
+                    if fp_name not in self.p_docs[block][dataset]:
+                        self.p_docs[block][dataset][fp_name] = fp_value
+        for feature, _pp in inner_pp.iteritems():
+            if feature not in self.pp:
+                self.pp[feature] = _pp
+
+        # Perform the inner model regression
         models['inner_model'], rmses['inner_model'], errors['inner_model'] = \
                 getattr(self, inner_method)(inner_regressor,
+                                            x_dict=inner_x,
                                             y_dict=errors['outer_model'])
 
         # Compile the outputs for the hierarchical model
@@ -304,7 +326,7 @@ class RegressionProcessor(object):
             # Calculate the rmses and the errors
             for dataset, y in self.y[block].iteritems():
                 y_hat = y + errors['outer_model'][block][dataset] \
-                        - models['inner_model'][block].predict(self.x[block][dataset])
+                        - models['inner_model'][block].predict(inner_x[block][dataset])
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
                 errors[block][dataset] = y_hat - y
