@@ -18,6 +18,9 @@ All of the non-hidden methods in this class return the same outputs:
                 of the results.
     pp          A dictionary containing the preprocessors used when converting the
                 fingerprints to features. The key is the name of the fingerprint.
+    norms       An np.array (vector) that is the `norm` vector returned by
+                sklearn.preprocessing.normalize. You need to divide inputs by `norms`
+                for the prediction to work.
 '''
 
 __author__ = 'Kevin Tran'
@@ -229,7 +232,9 @@ class PullFeatures(object):
         split_p_docs = copy.deepcopy(x)
 
         # Stack p_docs to create the inputs, then normalize them
-        x['train+test'] = preprocessing.normalize(self._stack(features, factors), axis=0)
+        x['train+test'], norm = preprocessing.normalize(self._stack(features, factors),
+                                                        axis=0,
+                                                        return_norm=True)
         # Stack p_docs to create the outputs
         y['train+test'] = self._stack(features, responses)
         # Split the inputs and outputs. We also pull out indices for splitting so that we
@@ -243,7 +248,7 @@ class PullFeatures(object):
                         'train': {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()},
                         'test': {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()},}
 
-        return x, y, split_p_docs
+        return x, y, split_p_docs, norm
 
 
     def energy_fr_coordcount(self):
@@ -282,9 +287,9 @@ class PullFeatures(object):
         features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
 
         # Stack, split, and structure the data
-        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
 
-        return x, y, p_docs, pp
+        return x, y, p_docs, pp, norm
 
 
     def energy_fr_coordcount_ads(self):
@@ -385,9 +390,9 @@ class PullFeatures(object):
                 features['nextnearestcoordination'] - features['coordination']
 
         # Stack, split, and structure the data
-        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
 
-        return x, y, p_docs, pp
+        return x, y, p_docs, pp, norm
 
 
     def energy_fr_coordcount_nncoord(self):
@@ -436,9 +441,9 @@ class PullFeatures(object):
                 features['nextnearestcoordination'] - features['coordination']
 
         # Stack, split, and structure the data
-        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
 
-        return x, y, p_docs, pp
+        return x, y, p_docs, pp, norm
 
 
     def energy_fr_nncoord(self):
@@ -480,9 +485,9 @@ class PullFeatures(object):
                 features['nextnearestcoordination'] - features['coordination']
 
         # Stack, split, and structure the data
-        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
 
-        return x, y, p_docs, pp
+        return x, y, p_docs, pp, norm
 
 
     # TODO:  Convert to aux db format... and pretty much re-do it
@@ -643,6 +648,6 @@ class PullFeatures(object):
                 pass
 
         # Stack, split, and structure the data
-        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
 
-        return x, y, p_docs, pp
+        return x, y, p_docs, pp, norm

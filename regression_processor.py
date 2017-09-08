@@ -62,6 +62,9 @@ class RegressionProcessor(object):
                         Note that the order of the values in the tuple corresponds to the
                         order in which the fingerprints are listed within `blocks`.
                         If there is no block, then `block_list` = 'no_block'.
+            norm        A 1-D np.array containing the normalization factors for the features.
+                        You need to (element-wise) divide new feature inputs by this vector
+                        for the model to work correctly.
         '''
         # Initialize the outputs
         self.x = {}
@@ -70,7 +73,7 @@ class RegressionProcessor(object):
         self.blocks = blocks
         # Pull out the features, and then assign them to the class attributes
         self.puller = PullFeatures(**kwargs)
-        self.x['no_block'], self.y['no_block'], self.p_docs['no_block'], self.pp = \
+        self.x['no_block'], self.y['no_block'], self.p_docs['no_block'], self.pp, self.norm = \
                 getattr(self.puller, feature_set)()
 
         if blocks:
@@ -255,8 +258,6 @@ class RegressionProcessor(object):
         return models, rmses, errors
 
 
-    # TODO:  Unlike the rest of the information, we end up losing inner_x.
-    # We should eventually save it somehow.
     def hierarchical(self, outer_models, outer_rmses, outer_errors,
                      inner_feature_set, inner_method, inner_regressor):
         '''
@@ -295,7 +296,7 @@ class RegressionProcessor(object):
         # Initialize/pull the information for the inner feature set
         inner_x = {}
         inner_p_docs = {}
-        inner_x['no_block'], _, inner_p_docs['no_block'], inner_pp \
+        inner_x['no_block'], _, inner_p_docs['no_block'], inner_pp, inner_norm \
                 = getattr(self.puller, inner_feature_set)()
         # Filter the information for the inner feature set information
         if len(self.block_list) != 1:    # No need to filter if our only block is 'no_block'
@@ -352,4 +353,4 @@ class RegressionProcessor(object):
                 return y_hat
             models[block] = __h_model
 
-        return models, rmses, errors
+        return models, rmses, errors, inner_x, inner_norm
