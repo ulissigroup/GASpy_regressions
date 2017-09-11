@@ -12,7 +12,6 @@
 module load python
 source activate /project/projectdirs/m2755/GASpy_conda/
 cd /global/project/projectdirs/m2755/Kevin/GASpy/GASpy_regressions/
-jupyter nbconvert --to python regress.ipynb
-python regress.py >> regression.log
+python update_model.py >> update_model.log
 
 # CommonAdapter (SLURM) completed writing Template
