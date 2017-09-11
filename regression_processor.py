@@ -185,7 +185,7 @@ class RegressionProcessor(object):
                 y_hat = models[block].predict(x_dict[block][dataset])
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
-                errors[block][dataset] = y_hat - y
+                errors[block][dataset] = y - y_hat
 
         return models, rmses, errors
 
@@ -253,7 +253,7 @@ class RegressionProcessor(object):
                 y_hat = 'foo'
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
-                errors[block][dataset] = y_hat - y
+                errors[block][dataset] = y - y_hat
 
         return models, rmses, errors
 
@@ -326,11 +326,10 @@ class RegressionProcessor(object):
             errors[block] = dict.fromkeys(self.y[block])
             # Calculate the rmses and the errors
             for dataset, y in self.y[block].iteritems():
-                y_hat = y + errors['outer_model'][block][dataset] \
-                        - models['inner_model'][block].predict(inner_x[block][dataset])
+                y_hat = y - error['inner_model'][block][dataset]
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
-                errors[block][dataset] = y_hat - y
+                errors[block][dataset] = y - y_hat
 
             # Create a function that will serve as the hierarchical model
             def __h_model(x_outer, x_inner):
