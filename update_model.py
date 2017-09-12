@@ -64,87 +64,56 @@ DATA = {}
 
 # # Regress
 
-# ## Hierarchical
-# TODO:  Test the iterable nature of these cells (i.e., use more than one outer and inner combo)
+# ## SKLearn Gaussian Process
 
 # ### Execute
 
 # In[ ]:
 
+# Specify the kernel to use. If it's `None`, then it uses SKLearn's default RBF
+K = 1.0 * RBF(length_scale=0.05)+1.0*RBF(length_scale=0.2)+1.0*WhiteKernel(noise_level=0.05**2.0) 
+#K = None
+n_restarts = 2
+# Create the model that you want to use to perform the regression
+regressor = GaussianProcessRegressor(kernel=K, n_restarts_optimizer=n_restarts)
 # Specify the model blocking. Use [] if you don't want blocking (this will help with saving)
 #blocks = ['adsorbate']
 blocks = []
 
-# Outer regression information
-OUTER_FEATURE_SETS = ['energy_fr_coordcount_ads']
-OUTER_REGRESSORS = [TPOTRegressor(generations=4,
-                                  population_size=16,
-                                  verbosity=2,
-                                  random_state=42)]
-OUTER_REGRESSION_METHODS = ['tpot']
-OUTER_SYSTEMS = [(outer_feature_set, OUTER_REGRESSORS[i], OUTER_REGRESSION_METHODS[i])
-                 for i, outer_feature_set in enumerate(OUTER_FEATURE_SETS)]
-# Inner regression information
-INNER_FEATURE_SETS = ['energy_fr_nncoord']
-#K = 1.0*RBF(length_scale=1.0) + 1.0*WhiteKernel(noise_level=0.05**2.0) 
-K = None
-INNER_REGRESSORS = [GaussianProcessRegressor(kernel=K, n_restarts_optimizer=2)]
-INNER_REGRESSION_METHODS = ['sk_regressor']
-INNER_SYSTEMS = [(inner_feature_set, INNER_REGRESSORS[i], INNER_REGRESSION_METHODS[i])
-                 for i, inner_feature_set in enumerate(INNER_FEATURE_SETS)]
+# Initialize the results
+models = dict.fromkeys(FEATURE_SETS)
+rmses = dict.fromkeys(FEATURE_SETS)
+errors = dict.fromkeys(FEATURE_SETS)
+x = dict.fromkeys(FEATURE_SETS)
+y = dict.fromkeys(FEATURE_SETS)
+p_docs = dict.fromkeys(FEATURE_SETS)
+block_list = dict.fromkeys(FEATURE_SETS)
+pp = dict.fromkeys(FEATURE_SETS)
+norm = dict.fromkeys(FEATURE_SETS)
 
-# `FEATURE_COMBINATIONS` is a list of tuples for the different combinations
-# of the outer and inner regressors we want. We use it to initialize the dictionaries
-# of our results.
-FEATURE_COMBINATIONS = [combo
-                        for combo in itertools.product(*[OUTER_FEATURE_SETS,
-                                                         INNER_FEATURE_SETS])]
-models = dict.fromkeys(FEATURE_COMBINATIONS)
-rmses = dict.fromkeys(FEATURE_COMBINATIONS)
-errors = dict.fromkeys(FEATURE_COMBINATIONS)
-x = dict.fromkeys(FEATURE_COMBINATIONS)
-y = dict.fromkeys(FEATURE_COMBINATIONS)
-p_docs = dict.fromkeys(FEATURE_COMBINATIONS)
-pp = dict.fromkeys(FEATURE_COMBINATIONS)
-block_list = dict.fromkeys(FEATURE_COMBINATIONS)
-# Initialize other output dictionaries
-RPs = dict.fromkeys(OUTER_FEATURE_SETS)
-norm = dict.fromkeys(OUTER_FEATURE_SETS+FEATURE_COMBINATIONS)
+for feature_set in FEATURE_SETS:
+    # Pull the data out and store some of the processing information for plotting purposes
+    rp = RegressionProcessor(feature_set, blocks=blocks, vasp_settings=VASP_SETTINGS)
+    x[feature_set] = rp.x
+    y[feature_set] = rp.y
+    p_docs[feature_set] = rp.p_docs
+    block_list[feature_set] = rp.block_list
+    pp[feature_set] = rp.pp
+    norm[feature_set] = rp.norm
+    # Perform the regression
+    models[feature_set], rmses[feature_set], errors[feature_set] =             rp.sk_regressor(regressor)
 
-# Perform the regressions for each combination of feature sets
-for o_feature_set, o_regressor, o_regression_method in OUTER_SYSTEMS:
-    # Initialize `RegressionProcessor` to pull the data
-    RPs[o_feature_set] = RegressionProcessor(o_feature_set,
-                                             blocks=blocks,
-                                             vasp_settings=VASP_SETTINGS)
-    # Perform the outer regressions
-    outer_models, outer_rmses, outer_errors =             getattr(RPs[o_feature_set], o_regression_method)(o_regressor)
-    # Perform the inner regressions
-    for i_feature_set, i_regressor, i_regression_method in INNER_SYSTEMS:
-        models[(o_feature_set, i_feature_set)],             rmses[(o_feature_set, i_feature_set)],             errors[(o_feature_set, i_feature_set)],             _, inner_norm                 = RPs[o_feature_set].hierarchical(outer_models, outer_rmses, outer_errors,
-                                                  i_feature_set,
-                                                  i_regression_method,
-                                                  i_regressor)
-        # Store some of the RegressionProcessor attributes for later use
-        x[(o_feature_set, i_feature_set)] = RPs[o_feature_set].x
-        y[(o_feature_set, i_feature_set)] = RPs[o_feature_set].y
-        p_docs[(o_feature_set, i_feature_set)] = RPs[o_feature_set].p_docs
-        pp[(o_feature_set, i_feature_set)] = RPs[o_feature_set].pp
-        block_list[(o_feature_set, i_feature_set)] = RPs[o_feature_set].block_list
-        norm[(o_feature_set, i_feature_set)] = inner_norm
-    norm[o_feature_set] = RPs[o_feature_set].norm
-        
 # Package the data that'll be used for plotting
-DATA['GPinTPOT'] = {'models': models,
-                    'rmses': rmses,
-                    'errors': errors,
-                    'x': x,
-                    'y': y,
-                    'p_docs': p_docs,
-                    'blocks': blocks,
-                    'block_list': block_list,
-                    'pp': pp,
-                    'norm': norm}
+DATA['GP'] = {'models': models,
+              'rmses': rmses,
+              'errors': errors,
+              'x': x,
+              'y': y,
+              'p_docs': p_docs,
+              'blocks': blocks,
+              'block_list': block_list,
+              'pp': pp,
+              'norm': norm}
 
 
 # ### Save
@@ -152,20 +121,18 @@ DATA['GPinTPOT'] = {'models': models,
 # In[ ]:
 
 # Save the regressions
-for o_feature_set in OUTER_FEATURE_SETS:
-    for i_feature_set in INNER_FEATURE_SETS:
-        # Save the models alone for GASpy_predict to use
-        with open('pkls/models/GPinTPOT_model_'                   + i_feature_set + '-inside-' + o_feature_set + '_'                   + '-'.join(DATA['GPinTPOT']['blocks']) + '.pkl', 'wb') as f:
-            pkl = {'model': DATA['GPinTPOT']['models'][(o_feature_set, i_feature_set)],
-                   'pp': DATA['GPinTPOT']['pp'][(o_feature_set, i_feature_set)],
-                   'norm': {'outer': DATA['GPinTPOT']['norm'][o_feature_set],
-                            'inner': DATA['GPinTPOT']['norm'][(o_feature_set, i_feature_set)]}}
-            pickle.dump(pkl, f)
-
-        # Save the entire package to use later in this notebook
-        data = {}
-        for datum in ['models', 'rmses', 'errors', 'x', 'y', 'p_docs', 'block_list', 'pp']:
-            data[datum] = DATA['GPinTPOT'][datum][(o_feature_set, i_feature_set)]
-        with open('pkls/data/GPinTPOT_data_'                   + i_feature_set + '-inside-' + o_feature_set + '_'                   + '-'.join(DATA['GPinTPOT']['blocks']) + '.pkl', 'wb') as f:
-            pickle.dump(data, f)
+for feature_set in FEATURE_SETS:
+    # Save the models alone for GASpy_predict to use
+    pkl = {'model': DATA['GP']['models'][feature_set],
+           'pp': DATA['GP']['pp'][feature_set],
+           'norm': DATA['GP']['norm'][feature_set]}
+    with open('pkls/models/GP_model_' + feature_set + '_'               + '-'.join(DATA['GP']['blocks']) + '.pkl', 'wb') as f:
+        pickle.dump(pkl, f)
+        
+    # Save the entire package to use later in this notebook
+    data = {}
+    for datum in ['models', 'rmses', 'errors', 'x', 'y', 'p_docs', 'block_list', 'pp']:
+        data[datum] = DATA['GP'][datum][feature_set]
+    with open('pkls/data/GP_data_' + feature_set + '_' +               '-'.join(DATA['GP']['blocks']) + '.pkl', 'wb') as f:
+        pickle.dump(data, f)
 
