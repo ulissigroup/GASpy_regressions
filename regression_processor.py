@@ -326,12 +326,14 @@ class RegressionProcessor(object):
             errors[block] = dict.fromkeys(self.y[block])
             # Calculate the rmses and the errors
             for dataset, y in self.y[block].iteritems():
-                y_hat = y - error['inner_model'][block][dataset]
+                y_hat = y - errors['inner_model'][block][dataset]
                 mse = metrics.mean_squared_error(y, y_hat)
                 rmses[block][dataset] = math.sqrt(mse)
                 errors[block][dataset] = y - y_hat
 
             # Create a function that will serve as the hierarchical model
+            # TODO:  This function currently assumes that both layers are SK-like.
+            # We should probably fix this.
             def __h_model(x_outer, x_inner):
                 '''
                 Inputs:
@@ -348,7 +350,7 @@ class RegressionProcessor(object):
                 # The inner model's estimate of the outer model's error
                 y_inner = models['inner_model'][block].predict(x_inner)
                 # The hierarchical model's estimate of the solution
-                y_hat = y_outer - y_inner
+                y_hat = y_outer + y_inner
                 return y_hat
             models[block] = __h_model
 
