@@ -2,8 +2,8 @@
 
 ## Purpose
 [GASpy](https://github.com/ktran9891/GASpy) is able to create various catalyst-adsorbate systems and then
-use DFT to simulate the adsorption energies of these systems. GASpy_regressions is meant to analyze
-GASpy's results in order to
+use DFT to simulate the adsorption energies of these systems. This repository, which is meant to be a submodule of
+GASpy, analyzes GASpy's results in order to
 1. Create surrogate models to identify potentially high-performing catalysts
 2. Analyze/visualize GASpy's DFT data and the surrogate models' data
 
