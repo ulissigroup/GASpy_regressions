@@ -1,4 +1,4 @@
-#!/bin/bash -l
+#!/bin/sh
 
 #SBATCH --nodes=1
 #SBATCH --time=02:00:00
