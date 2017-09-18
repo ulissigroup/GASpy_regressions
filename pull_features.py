@@ -225,6 +225,9 @@ class PullFeatures(object):
             split_p_docs    A re-structured version of `p_docs`. Now it is a dictionary
                             with the same keys as the other outputs. The values have the same
                             structure as the original `p_docs`.
+            norms           An np.array (vector) that is the `norm` vector returned by
+                            sklearn.preprocessing.normalize. You need to divide inputs by `norms`
+                            for the prediction to work.
         '''
         # Initialize the outputs
         x = {'train': None, 'test': None, 'train+test': None}
@@ -334,9 +337,56 @@ class PullFeatures(object):
         features['coordination'], pp['coordination'] = self._coord2coordcount(p_docs['coordination'])
 
         # Stack, split, and structure the data
-        x, y, p_docs = self._post_process(features, factors, responses, p_docs)
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
 
-        return x, y, p_docs, pp
+        return x, y, p_docs, pp, norm
+
+
+    def energy_fr_structure_hash(self):
+        '''
+        Pull data according to the following motifs:
+            coord_count     A vector of ordered integers. Each integer represents the number
+                            of atoms of an element that are coordinated with the adsorbate.
+                            For example:  a coordination site of Au-Ag-Ag could be represented
+                            by [0, 0, 0, 1, 0, 2], where the zeros represent the coordination
+                            counts for other elements (e.g., Al or Pt).
+            ads             A vector of binaries that indicate the type of adsorbate.
+        '''
+        # Identify the factors & responses. This will be used to build the outputs.
+        factors = ['hash']
+        responses = ['energy']
+        # Establish the variables to pull (i.e., `fingerprints`) and pull it from
+        # the database
+        fingerprints = {'mpid': '$processed_data.calculation_info.mpid',
+                        'miller': '$processed_data.calculation_info.miller',
+                        'top': '$processed_data.calculation_info.top',
+                        'coordination': '$processed_data.fp_final.coordination',
+                        'nextnearestcoordination': '$processed_data.fp_init.nextnearestcoordination',
+                        'neighborcoord': '$processed_data.fp_init.neighborcoord',
+                        'adsorbates': '$processed_data.calculation_info.adsorbate_names',
+                        'energy': '$results.energy'}
+        p_docs = self._pull(fingerprints=fingerprints)
+
+        # Initialize a second dictionary, `features`, that will be identical to the `p_docs`
+        # dictionary, except the values will be pre-processed such that they may be accepted
+        # and readable by regressors
+        features = dict.fromkeys(factors+responses)
+
+        pp = {}
+        pp['hash'] =  preprocessing.LabelBinarizer()
+        hashed_vals=map(lambda a,b,c,d,e,f: ''.join(map(str,[a,b,c,d,e,f])),p_docs['mpid'],p_docs['miller'],p_docs['coordination'],p_docs['nextnearestcoordination'],p_docs['top'],p_docs['neighborcoord'])
+        pp['hash'] = pp['hash'].fit(hashed_vals)
+        features['hash'] = pp['hash'].transform(hashed_vals)
+
+        p_docs['adsorbate'] = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
+
+        # Pre-process the energy
+        features['energy'] = np.array(p_docs['energy'])
+
+        # Stack, split, and structure the data
+        x, y, p_docs, norm = self._post_process(features, factors, responses, p_docs)
+
+        return x, y, p_docs, pp, norm
 
 
     def energy_fr_coordcount_nncoord_ads(self):
