@@ -8,7 +8,7 @@ GASpy, analyzes GASpy's results in order to
 2. Analyze/visualize GASpy's DFT data and the surrogate models' data
 
 ## Overview
-`pull_features.py` contains a Python class, `PullFeatures`, that pulls and pre-processes data from GASpy's database.
+`feature_puller.py` contains a Python class, `FeaturePuller`, that pulls and pre-processes data from GASpy's database.
 `Regress.ipynb` then uses these pre-processed data to perform regressions, which yield models that
 can predict adsorption energies from structural information (e.g., coordination number, adsorbate identity, etc.).
 
