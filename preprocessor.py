@@ -1,10 +1,6 @@
 '''
 This class contains methods to convert mongo documents to and from preprocessed
 vectors that are meant to be fed into regressors.
-
-We transform fingerprints into features by creating preprocessing functions
-for each of the features, and then concatenating the outputs of each of these functions
-into a single numpy array.
 '''
 
 __author__ = 'Kevin Tran'
@@ -15,16 +11,21 @@ import copy
 from collections import OrderedDict
 import numpy as np
 from sklearn import preprocessing
-from pymatgen.io.ase import AseAtomsAdaptor
-from pymatgen.analysis.structure_analyzer import VoronoiCoordFinder
-from vasp.mongo import mongo_doc_atoms
 
 
 class GASpyPreprocessor(object):
+    '''
+    We transform fingerprints into features by creating preprocessing functions
+    for each of the features, and then concatenating the outputs of each of these functions
+    into a single numpy array. The preprocessing functions are created in the hidden
+    methods (i.e., ones that start with `_`).
+    '''
+    # pylint: disable=missing-docstring
     def __init__(self, p_docs, features):
         '''
         This `__init__` method creates the list of preprocessing functions, `preprocessors`.
-        It also creates the feature scaler, `scaler`.
+        It also creates the feature scaler, `scaler`. In other words:  This class is ready
+        to start preprocessing right after it's instantiated. No need to do a `.fit`.
 
         Input:
             p_docs      The parsed mongo docs that you want to pre-process into features.
@@ -75,8 +76,12 @@ class GASpyPreprocessor(object):
         Output:
             preprocess_energy   Function to turn floats into a numpy array
         '''
+        if not p_docs:
+            p_docs = copy.deepcopy(self.p_docs)
+
         def preprocess_energy(p_docs):
             return np.array(p_docs)
+
         return preprocess_energy
 
 
