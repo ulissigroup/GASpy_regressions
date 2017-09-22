@@ -51,8 +51,9 @@ class GASpyPreprocessor(object):
         for feature in features:
             self.preprocessors[feature] = getattr(self, '_'+feature)()
 
-        # [Partially] preprocess the fingerprints, then stack them together
+        # Partially preprocess the fingerprints
         numerical_features = [preprocessor(p_docs) for preprocessor in self.preprocessors.values()]
+        # Stack the partially preprocessed fingerprints (if necessary)
         if len(numerical_features) > 1:
             stacked_features = []
             for i in range(len(numerical_features[0])):
@@ -61,6 +62,7 @@ class GASpyPreprocessor(object):
             stacked_features = np.array(stacked_features)
         elif len(numerical_features) == 1:
             stacked_features = numerical_features[0]
+
         # Create and fit the scaler
         self.scaler = preprocessing.StandardScaler()
         self.scaler.fit_transform(stacked_features)
@@ -124,6 +126,7 @@ class GASpyPreprocessor(object):
         Output:
             preprocess_coordcount   Function to preprocess parsed mongo docs into
                                     an array of binary vectors
+            lb                      The label binarizer fitted to the symbols
         '''
         if not p_docs:
             p_docs = copy.deepcopy(self.p_docs)
@@ -146,7 +149,10 @@ class GASpyPreprocessor(object):
                                     for coord in coords])
             return coordcounts
 
-        return preprocess_coordcount
+        if not return_lb:
+            return preprocess_coordcount
+        else:
+            return preprocess_coordcount, lb
 
 
     def _rnnc_count(self, p_docs=None):
@@ -164,7 +170,7 @@ class GASpyPreprocessor(object):
             p_docs = copy.deepcopy(self.p_docs)
 
         # Create a label binarizer to convert a single symbol string into a vector of binaries
-        coordcount_transform, lb = self._coordcount(p_docs, return_lb=True)
+        preprocess_coordcount, lb = self._coordcount(p_docs, return_lb=True)
 
         def preprocess_rnnc_count(p_docs):
             '''
@@ -174,9 +180,9 @@ class GASpyPreprocessor(object):
             # Unpack
             nncs = p_docs['nextnearestcoordination']
             # Calculate
-            nnc_counts = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
+            nnc_counts = np.array([np.sum(lb.transform(nnc.split('-')), axis=0)
                                    for nnc in nncs])
-            rnnc_counts = nnc_counts - coordcount_transform(p_docs)
+            rnnc_counts = nnc_counts - preprocess_coordcount(p_docs)
             return rnnc_counts
 
         return preprocess_rnnc_count

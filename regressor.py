@@ -106,31 +106,35 @@ class GASpyRegressor(object):
             f_max               The upper limit on the maximum force on an atom
                                 in the system
         Resulting attributes:
-            features    Same thing as the input. Used mainly for making file_name to save
-            responses   Same thing as the input. Used mainly for making file_name to save
-            blocks      Same thing as the input. Used mainly for making file_name to save
-            x           A nested dictionary with the following structure:
-                        x = {'block': {'train': np.array(INPUT_DATA),
-                                       'test': np.array(INPUT_DATA),
-                                       'train+test': np.array(INPUT_DATA)}
-            y           The same as `x`, but for the outputs, not the inputs
-            p_docs      The same as `x`, but the dict values are not np.arrays of data.
-                        Instead, they are dictionaries with structures analogous to the
-                        `p_docs` returned by `gaspy.utils.get_docs`, i.e., it is a dictionary
-                        whose keys are the keys of `fingerprints` and whose values are lists
-                        of the results.
-            pp          The instance of GASpyPreprocessor that was used to preprocess the
-                        data set pulled by FeaturePuller. This is used to preprocess other data
-                        to make future predictions.
-            block_list  A list of tuples. Each tuple represents a different block, and
-                        each element in these tuples corresponds to a different fingerprint
-                        value. For example:  Say that `blocks` = ['adsorbate`, `mpid`] and
-                        'adsorbate` could take values of ['H', 'O'], while 'mpid' could
-                        take values of ['mp-23', 'mp-126']. Then `block_list` would be
-                        [('H', 'mp-23'), ('O', 'mp-23'), ('H', 'mp-126'), ('O', 'mp-126')].
-                        Note that the order of the values in the tuple corresponds to the
-                        order in which the fingerprints are listed within `blocks`.
-                        If there is no block, then `block_list` = 'no_block'.
+            features        Same thing as the input. Used mainly for making file_name to save
+            responses       Same thing as the input. Used mainly for making file_name to save
+            blocks          Same thing as the input. Used mainly for making file_name to save
+            x               A nested dictionary with the following structure:
+                            x = {'block': {'train': np.array(INPUT_DATA),
+                                           'test': np.array(INPUT_DATA),
+                                           'train+test': np.array(INPUT_DATA)}
+            y               The same as `x`, but for the outputs, not the inputs
+            p_docs          The same as `x`, but the dict values are not np.arrays of data.
+                            Instead, they are dictionaries with structures analogous to the
+                            `p_docs` returned by `gaspy.utils.get_docs`, i.e., it is a dictionary
+                            whose keys are the keys of `fingerprints` and whose values are lists
+                            of the results.
+            pp              The instance of GASpyPreprocessor that was used to preprocess the
+                            data set pulled by FeaturePuller. This is used to preprocess other data
+                            to make future predictions.
+            block_list      A list of tuples. Each tuple represents a different block, and
+                            each element in these tuples corresponds to a different fingerprint
+                            value. For example:  Say that `blocks` = ['adsorbate`, `mpid`] and
+                            'adsorbate` could take values of ['H', 'O'], while 'mpid' could
+                            take values of ['mp-23', 'mp-126']. Then `block_list` would be
+                            [('H', 'mp-23'), ('O', 'mp-23'), ('H', 'mp-126'), ('O', 'mp-126')].
+                            Note that the order of the values in the tuple corresponds to the
+                            order in which the fingerprints are listed within `blocks`.
+                            If there is no block, then `block_list` = 'no_block'.
+            indices_train   The indices that can be used to find the training set
+                            from the entire set
+            indices_test    The indices that can be used to find the test set
+                            from the entire set
         '''
         self.features = features
         self.responses = responses
@@ -151,7 +155,8 @@ class GASpyRegressor(object):
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             fingerprints['symbols'] = '$atoms.chemical_symbols'
         if 'rnnc_count' in _features:
-            fingerprints['coordination'] = '$processed_data.fp_final_coordination'
+            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
+            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['nnc'] = '$processed_data.fp_init.nextnearestcoordination'
         if 'ads' in _features:
@@ -161,8 +166,27 @@ class GASpyRegressor(object):
             fingerprints['miller'] = '$processed_data.calculation_info.miller'
             fingerprints['top'] = '$processed_data.calculation_info.top'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            fingerprints['nextnearestcoordination'] = '$processed_data.fp_init.nextnearestcoordination'
-            fingerprints['neighborcoord'] = '$processed_data.fp_init.neighborcoord'
+            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
+            fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
+        # If we want to block by some fingerprint, then we had better pull it out.
+        # Here are some common ones to make life easy.
+        if blocks:
+            _blocks = dict.fromkeys(blocks)
+            if 'adsorbate' in _blocks:
+                fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
+            if 'mpid' in _blocks:
+                fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
+            if 'miller' in _blocks:
+                fingerprints['miller'] = '$processed_data.calculation_info.miller'
+            if 'top' in _blocks:
+                fingerprints['top'] = '$processed_data.calculation_info.top'
+            if 'coordination' in _blocks:
+                fingerprints['coordination'] = '$processed_data.fp_final.coordination'
+            if 'nextnearestcoordination' in _blocks:
+                fingerprints['nextnearestcoordination'] = '$processed_data.fp_init.nextnearestcoordination'
+            if 'neighborcoord' in _blocks:
+                fingerprints['neighborcoord'] = '$processed_data.fp_init.neighborcoord'
+
         # Some responses require specific queries. Here, we make sure that the correct
         # queries are defined
         _responses = dict.fromkeys(responses)
@@ -216,35 +240,19 @@ class GASpyRegressor(object):
         self.p_docs = {'no_block': {'train': p_docs_train,
                                     'test': p_docs_test,
                                     'train+test': p_docs}}
+        self.indices_train = indices_train
+        self.indices_test = indices_test
 
         if blocks:
-            # If we want to block by some fingerprint, then we had better pull it out.
-            # Here are some common ones to make life easy.
-            _blocks = dict.fromkeys(blocks)
-            if 'adsorbate' in _blocks:
-                fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
-            if 'mpid' in _blocks:
-                fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
-            if 'miller' in _blocks:
-                fingerprints['miller'] = '$processed_data.calculation_info.miller'
-            if 'top' in _blocks:
-                fingerprints['top'] = '$processed_data.calculation_info.top'
-            if 'coordination' in _blocks:
-                fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            if 'nextnearestcoordination' in _blocks:
-                fingerprints['nextnearestcoordination'] = '$processed_data.fp_init.nextnearestcoordination'
-            if 'neighborcoord' in _blocks:
-                fingerprints['neighborcoord'] = '$processed_data.fp_init.neighborcoord'
-
             # TODO:  Address this when we start doing co-adsorption.
             # If we're blocking by adsorbate, then we create a new fingerprint, `adsorbate`,
             # from the fingerprint `adsorbates`. Note that the latter is a list of adsorbates,
             # while the former is simply the first adsorbate. This really only works
             # because we're only looking at one adsorbate at a time right now.
             if 'adsorbate' in dict.fromkeys(blocks):
-                for dataset, p_docs in self.p_docs.iteritems():
-                    self.p_docs[dataset] = [adsorbates[0]
-                                            for adsorbates in p_docs[dataset]['adsorbates']]
+                for dataset in self.p_docs['no_block']:
+                    self.p_docs['no_block'][dataset]['adsorbate'] = \
+                            [adsorbates[0] for adsorbates in self.p_docs['no_block'][dataset]['adsorbates']]
 
             # Warn the user if they're trying to block by something that they might not
             # be pulling
@@ -374,9 +382,9 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(inputs, block='no_block'):
+        def _predict(features, block='no_block'):
             model = models[block]
-            predictions = model.predict(inputs)
+            predictions = model.predict(features)
             return predictions
 
         # Assign the attributes
@@ -439,9 +447,9 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(inputs, block='no_block'):
+        def _predict(features, block='no_block'):
             model = models[block]
-            predictions = model.predict(inputs)
+            predictions = model.predict(features)
             return predictions
 
         # Assign the attributes
@@ -485,36 +493,22 @@ class GASpyRegressor(object):
         self.errors = errors
 
 
-    # TODO:  Finish updating this method.
-    def fit_hierarchical(self, outer_models, outer_rmses, outer_error,
-                         inner_feature_set, inner_method, inner_regressor,
-                         blocks=None):
+    def fit_hierarchical(self, outer_regressor, outer_method, outer_features,
+                         blocks=None, model_name=None):
         # pylint: disable=too-many-arguments
         '''
-        This method accepts the results of many of the other methods of this class and
-        then tries to fit another model to regress the subsequent erros of the original
-        model. Note that this method assumes that you use the same blocking structure
-        for both the inner and the outer methods, and that you also use the same GASpy_DB
-        snapshot.
+        This method will wrap a regression model around the regression that you've already
+        fit (using one of the other `fit_*` methods). In other words, it will try to fit
+        a model on the residuals of your first regression.
+
+        Note that you cannot nest this method within itself. Because I didn't feel like
+        coding that.
 
         Inputs:
-            outer_models        The `models` for the outer model
-            outer_rmses         The `rmses` for the outer model
-            outer_errors        The `errors` for the outer model
-            inner_feature_set   A string corresponding to the feature set for the inner model
-            inner_method        The `Regress` method to be used to create the inner model
-            inner_regressor     The regressing object that should be used by the inner model
             blocks      A list of tuples indicating the blocks that you want to perform
                         the regression on.
-        Outputs:
-            models  A function that accepts the input to the outer model and the input
-                    to the inner model to make a final prediction. All inputs should
-                    probably be np.arrays. The outputs will probably np.arrays.
-            rmses   This will be the same as "normal", but it will have two additional
-                    keys:  'inner_model' and 'outer_model'. The subsequent values
-                    will be identical to a normal `rmses` object, but specific to
-                    either the inner or outer model.
-            errors  Same as `rmses`, but for the errors instead
+            model_name  If you want to name this model something differently, then go
+                        ahead. Doing so might reduce regressor saving conflicts.
         '''
         # Set defaults
         if not blocks:
@@ -522,95 +516,76 @@ class GASpyRegressor(object):
         if not model_name:
             model_name = 'hierarchical'
         self.model_name = model_name
-        # Initialize the outputs
-        models = dict.fromkeys(blocks)
-        rmses = dict.fromkeys(blocks)
-        errors = dict.fromkeys(blocks)
-        # Store the outer model information
-        models['outer_model'] = outer_models
-        rmses['outer_model'] = outer_rmses
-        errors['outer_model'] = outer_errors
+        # Store the inner model's information into separate attributes before we overwrite them
+        try:
+            self.features_inner = copy.deepcopy(self.features)
+            self.x_inner = copy.deepcopy(self.x)
+            self.pp_inner = copy.deepcopy(self.pp)  # pylint: disable=access-member-before-definition
+            self._predict_inner = copy.deepcopy(self._predict)
+            self.rmses_inner = copy.deepcopy(self.rmses)
+            self.errors_inner = copy.deepcopy(self.errors)
+        except AttributeError:
+            raise AttributeError('You tried to fit an outer model without fitting an inner model')
+        # Pull out p_docs (for ease of reading)
+        p_docs = self.p_docs
 
-        # Initialize/pull the information for the inner feature set
-        inner_x = {}
-        inner_p_docs = {}
-        inner_x['no_block'], _, inner_p_docs['no_block'], inner_pp, inner_norm \
-                = getattr(self.puller, inner_feature_set)()
-        # Filter the information for the inner feature set information
-        if len(blocks) != 1:    # No need to filter if our only block is 'no_block'
-            for block in blocks:
-                inner_x[block] = self._filter(inner_x['no_block'], self.blocks, block)
-                inner_p_docs[block] = self._filter(inner_p_docs['no_block'], self.blocks, block)
-        # Add inner-feature-set information to the class attributes
-        for block in blocks:
-            for dataset, new_p_docs in inner_p_docs[block].iteritems():
-                for fp_name, fp_value in new_p_docs.iteritems():
-                    if fp_name not in self.p_docs[block][dataset]:
-                        self.p_docs[block][dataset][fp_name] = fp_value
-        for feature, _pp in inner_pp.iteritems():
-            if feature not in self.pp:
-                self.pp[feature] = _pp
+        # Create the outer preprocessor
+        try:
+            pp = GASpyPreprocessor(p_docs['no_block']['train+test'], outer_features)
+        except KeyError:
+            raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')
+        # Preprocess p_docs again, but this time for the outer regressor
+        x = copy.deepcopy(self.x_inner)
+        for block in x:
+            for dataset in x[block]:
+                x[block][dataset] = pp.transform(p_docs[block][dataset])
+        # Save the new attributes
+        self.features = outer_features
+        self.x = x
+        self.pp = pp
 
-        # Perform the inner model regression
-        models['inner_model'], rmses['inner_model'], errors['inner_model'] = \
-                getattr(self, inner_method)(inner_regressor,
-                                            x_dict=inner_x,
-                                            y_dict=errors['outer_model'])
+        # Execute the outer regression
+        getattr(self, outer_method)(outer_regressor, x_dict=x, y_dict=self.errors_inner,
+                                    blocks=blocks, model_name=model_name)
+        # Appropriately store the new function that we just made
+        self._predict_outer = copy.deepcopy(self._predict)
 
-        # Compile the outputs for the hierarchical model
-        for block in blocks:
-            # Initialize the sub-structure
-            rmses[block] = dict.fromkeys(self.y[block])
-            errors[block] = dict.fromkeys(self.y[block])
-            # Calculate the rmses and the errors
-            for dataset, y in self.y[block].iteritems():
-                y_hat = y - errors['inner_model'][block][dataset]
-                mse = metrics.mean_squared_error(y, y_hat)
-                rmses[block][dataset] = math.sqrt(mse)
-                errors[block][dataset] = y - y_hat
-
-        # Create the model
-        # TODO:  This function currently assumes that both layers are SK-like.
-        # We should probably fix this.
-        def _predict(x_outer, x_inner, block):
-            '''
-            Inputs:
-                x_outer An np.array that the outer model may accept directly in order
-                        to make its prediction of the final solution
-                x_inner An np.array that the inner model may accept directly in order
-                        to make its prediction of the outer model's error
-            Outputs:
-                y_hat   An np.array that represents this hierarchical model's
-                        final estimate of the solution
-            '''
-            # The outer model's estimate of the solution
-            y_outer = models['outer_model'][block].predict(x_outer)
-            # The inner model's estimate of the outer model's error
-            y_inner = models['inner_model'][block].predict(x_inner)
-            # The hierarchical model's estimate of the solution
-            y_hat = y_outer + y_inner
-            return y_hat
-        models[block] = __h_model
-
-        # Assign the attributes
+        # Create and save the hierarchical model
+        def _predict(inner_features, outer_features, block='no_block'):
+            inner_predictions = self._predict_inner(inner_features, block=block)
+            outer_predictions = self._predict_outer(outer_features, block=block)
+            predictions = inner_predictions - outer_predictions
+            return predictions
         self._predict = _predict
-        self.rmses = rmses
-        self.errors = errors
 
 
     def predict(self, p_docs, block='no_block'):
-        ''' This should be pretty obvious '''
-        preprocessed_features = self.pp(p_docs) # pylint: disable=not-callable
-        predictions = self._predict(preprocessed_features, block)
+        '''
+        This method is a wrapper for whatever `_predict` function that we created with a `fit_*`
+        method. The `_predict` function accepts preprocessed inputs. This method does
+        the preprocessing for the user and passes it to _predict.
+        '''
+        # First, assume that the model is hierarchical.
+        try:
+            inner_features = self.pp_inner(p_docs)
+            outer_features = self.pp(p_docs)    # pylint: disable=not-callable
+            predictions = self._predict(inner_features, outer_features, block=block)
+
+        # If not, then assume it's a single-layer model.
+        except AttributeError:
+            features = self.pp(p_docs) # pylint: disable=not-callable
+            predictions = self._predict(features, block)
+
         return predictions
 
 
-    def parity_plot(self, xlabel=None, ylabel=None,
-                    title=None, lims=None):
+    def parity_plot(self, split=False, xlabel=None, ylabel=None, title=None, lims=None):
         '''
         Create a parity plot of the model that's been fit.
 
         Input:
+            split   A boolean indicating whether you want to plot train and test
+                    separately or together
             xlabel  A string for the x-axis label
             ylabel  A string for the y-axis label
             title   A string for the title name. If `default`,
@@ -618,10 +593,10 @@ class GASpyRegressor(object):
             lims    A list whose elements decide the bounds within
                     which to create the parity line.
         '''
-        # pylint: disable=no-member
+        # pylint: disable=no-member, too-many-arguments
         # Establish defaults
         if not title:
-            title = 'Predicting %s using a(n) %s model' % (tuple(self.responses), self.model_name)
+            title = 'Predicting %s using a[n] %s model' % (tuple(self.responses), self.model_name)
         if not lims:
             lims = [-4, 6]
         if not xlabel:
@@ -637,23 +612,25 @@ class GASpyRegressor(object):
 
         traces = []
         # Make a plotly trace for each block & dataset
-        for block in self.p_docs:
-            for dataset in self.p_docs[block]:
-                # Don't plot 'train+test', because we're already plotting them separately
-                if dataset != 'train+test':
-                    # Unpack data from the class attributes
-                    x = self.x[block][dataset]
-                    y = self.y[block][dataset]
-                    p_docs = self.p_docs[block][dataset]
-                    errors = self.errors[block][dataset]
-                    # Calculate the model's prediction
-                    y_hat = y + errors
+        for block in self.errors:
+            if split:
+                datasets = ['train', 'test']
+            else:
+                datasets = ['train+test']
+            for dataset in datasets:
+                # Unpack data from the class attributes
+                x = self.x[block][dataset]
+                y = self.y[block][dataset]
+                p_docs = self.p_docs[block][dataset]
+                errors = self.errors[block][dataset]
+                # Calculate the model's prediction
+                y_hat = y + errors
 
-                    # Make the scatter plots
-                    traces.append(go.Scatter(x=y, y=y_hat,
-                                             name=str((block, dataset)),
-                                             mode='markers',
-                                             text='foo'))
+                # Make the scatter plots
+                traces.append(go.Scatter(x=y, y=y_hat,
+                                         name=str((block, dataset)),
+                                         mode='markers',
+                                         text='foo'))
         # Make a parity line
         traces.append(go.Scatter(x=lims, y=lims,
                                  name='parity line',
