@@ -23,8 +23,6 @@ pickle.settings['recurse'] = True     # required to pickle lambdify functions (f
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
 from plotly.offline import init_notebook_mode, plot, iplot
-init_notebook_mode(connected=True)
-#import plotly.plotly as py
 import plotly.graph_objs as go
 from preprocessor import GASpyPreprocessor
 sys.path.append('..')
@@ -150,18 +148,17 @@ class GASpyRegressor(object):
         fingerprints['mongo_id'] = '$_id'
         # Some features require specific fingerprints. Here, we make sure that those
         # fingerprints are included
-        _features = dict.fromkeys(features)
-        if 'coordcount' in _features:
+        if 'coordcount' in features:
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             fingerprints['symbols'] = '$atoms.chemical_symbols'
-        if 'rnnc_count' in _features:
+        if 'rnnc_count' in features:
             fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['nnc'] = '$processed_data.fp_init.nextnearestcoordination'
-        if 'ads' in _features:
+        if 'ads' in features:
             fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
-        if 'hash' in _features:
+        if 'hash' in features:
             fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
             fingerprints['miller'] = '$processed_data.calculation_info.miller'
             fingerprints['top'] = '$processed_data.calculation_info.top'
@@ -171,26 +168,24 @@ class GASpyRegressor(object):
         # If we want to block by some fingerprint, then we had better pull it out.
         # Here are some common ones to make life easy.
         if blocks:
-            _blocks = dict.fromkeys(blocks)
-            if 'adsorbate' in _blocks:
+            if 'adsorbate' in blocks:
                 fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
-            if 'mpid' in _blocks:
+            if 'mpid' in blocks:
                 fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
-            if 'miller' in _blocks:
+            if 'miller' in blocks:
                 fingerprints['miller'] = '$processed_data.calculation_info.miller'
-            if 'top' in _blocks:
+            if 'top' in blocks:
                 fingerprints['top'] = '$processed_data.calculation_info.top'
-            if 'coordination' in _blocks:
+            if 'coordination' in blocks:
                 fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            if 'nextnearestcoordination' in _blocks:
+            if 'nextnearestcoordination' in blocks:
                 fingerprints['nextnearestcoordination'] = '$processed_data.fp_init.nextnearestcoordination'
-            if 'neighborcoord' in _blocks:
+            if 'neighborcoord' in blocks:
                 fingerprints['neighborcoord'] = '$processed_data.fp_init.neighborcoord'
 
         # Some responses require specific queries. Here, we make sure that the correct
         # queries are defined
-        _responses = dict.fromkeys(responses)
-        if 'energy' in _responses:
+        if 'energy' in responses:
             fingerprints['energy'] = '$results.energy'
 
         # Pull the data into parsed mongo documents (i.e., a dictionary of lists), `p_docs`
@@ -250,7 +245,7 @@ class GASpyRegressor(object):
             # from the fingerprint `adsorbates`. Note that the latter is a list of adsorbates,
             # while the former is simply the first adsorbate. This really only works
             # because we're only looking at one adsorbate at a time right now.
-            if 'adsorbate' in dict.fromkeys(blocks):
+            if 'adsorbate' in blocks:
                 for dataset in self.p_docs['no_block']:
                     self.p_docs['no_block'][dataset]['adsorbate'] = \
                             [adsorbates[0] for adsorbates in self.p_docs['no_block'][dataset]['adsorbates']]
@@ -569,12 +564,12 @@ class GASpyRegressor(object):
         # First, assume that the model is hierarchical.
         try:
             inner_features = self.pp_inner(p_docs)
-            outer_features = self.pp(p_docs)    # pylint: disable=not-callable
+            outer_features = self.pp.transform(p_docs)
             predictions = self._predict(inner_features, outer_features, block=block)
 
         # If not, then assume it's a single-layer model.
         except AttributeError:
-            features = self.pp(p_docs) # pylint: disable=not-callable
+            features = self.pp.transform(p_docs)
             predictions = self._predict(features, block)
 
         return predictions
@@ -595,6 +590,9 @@ class GASpyRegressor(object):
                     which to create the parity line.
         '''
         # pylint: disable=no-member, too-many-arguments
+        # Enter notebook mode. Really only works in Jupyter
+        init_notebook_mode(connected=True)
+
         # Establish defaults
         if not title:
             title = 'Predicting %s using a[n] %s model' % (tuple(self.responses), self.model_name)
