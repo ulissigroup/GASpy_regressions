@@ -242,6 +242,7 @@ class GASpyRegressor(object):
                                     'train+test': p_docs}}
         self.indices_train = indices_train
         self.indices_test = indices_test
+        self.pp = pp
 
         if blocks:
             # TODO:  Address this when we start doing co-adsorption.
@@ -624,7 +625,7 @@ class GASpyRegressor(object):
                 p_docs = self.p_docs[block][dataset]
                 errors = self.errors[block][dataset]
                 # Calculate the model's prediction
-                y_hat = y + errors
+                y_hat = y - errors
 
                 # Make the scatter plots
                 traces.append(go.Scatter(x=y, y=y_hat,
@@ -634,7 +635,7 @@ class GASpyRegressor(object):
         # Make a parity line
         traces.append(go.Scatter(x=lims, y=lims,
                                  name='parity line',
-                                 line=dict(color=('block'), dash='dash')))
+                                 line=dict(color=('black'), dash='dash')))
 
         # Format and show the plot
         layout = go.Layout(xaxis=dict(title=xlabel),
