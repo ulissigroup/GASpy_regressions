@@ -11,7 +11,7 @@
 
 module load python
 source activate /project/projectdirs/m2755/GASpy_conda/
-cd /global/project/projectdirs/m2755/GASpy/GASpy_regressions/
+cd /global/project/projectdirs/m2755/GASpy_dev/GASpy_regressions/
 python update_model.py >> update_model.log
 
 # CommonAdapter (SLURM) completed writing Template
