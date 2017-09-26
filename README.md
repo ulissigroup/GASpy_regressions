@@ -8,13 +8,15 @@ GASpy, analyzes GASpy's results in order to
 2. Analyze/visualize GASpy's DFT data and the surrogate models' data
 
 ## Overview
-`feature_puller.py` contains a Python class, `FeaturePuller`, that pulls and pre-processes data from GASpy's database.
-`Regress.ipynb` then uses these pre-processed data to perform regressions, which yield models that
-can predict adsorption energies from structural information (e.g., coordination number, adsorbate identity, etc.).
+The main bread and butter of this submodule is the `GAspyRegressor` class inside the `regressor.py` module.
+You instantiate this class by passing it filter settings for it to pull and parse GASdb data from our Mongo DB.
+You then use one of the `GASpyRegressor.fit_*` methods to perform the regression. Afterwards, you may pass parsed
+mongo documents to the `GASpy_regressor.predict` method to make predictions. You can get these parsed mongo
+documents from the `gaspy.utils.get_docs` function.
 
 These models may be combined with GASpy_predict (https://github.com/ktran9891/GASpy_predict) and GASpy
 to create automated feedback loops of DFT-simulation, surrogate model regression, prediction, and more DFT-simulation.
-To facilitate this feedback loop, we created `update_model.ipynb`. This notebook is a trimmed version of `Regress.ipynb`
+To facilitate this feedback loop, we created `update_model.ipynb`. This notebook is a trimmed version of `sandbox.ipynb`
 that creates and saves only the models that we plan to use in the feedback loop. We then use Jupyter to convert
 `update_model.ipynb` into a standard Python file, `update_model.py`, which can be executed by shell scripts
 (`update_model.sh`), which can be executed in Cron jobs. Thus, we can automate the modeling portion of the feedback loop.
