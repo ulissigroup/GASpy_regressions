@@ -86,8 +86,10 @@ class GASpyRegressor(object):
             fingerprints        Mongo queries of parameters that you want pulled.
                                 Note that we automatically set some of these queries
                                 based on the features and responses you are trying to use.
-                                So you only need to define mongo queries for any extra
-                                information you want.
+                                We also pull the bulk identity and the miller index
+                                automatically, because... you should probably have those.
+                                So you really only need to define mongo queries for any
+                                extra information you want.
             vasp_settings       A string of vasp settings. Use the
                                 vasp_settings_to_str function in GAspy
             collection          A string for the mongo db collection you want to pull from.
@@ -187,6 +189,10 @@ class GASpyRegressor(object):
         # queries are defined
         if 'energy' in responses:
             fingerprints['energy'] = '$results.energy'
+        # And here we pull a couple of other things for good measure. Because we pretty
+        # much always want these.
+        fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
+        fingerprints['miller'] = '$processed_data.calculation_info.miller',
 
         # Pull the data into parsed mongo documents (i.e., a dictionary of lists), `p_docs`
         with utils.get_adsorption_db() as client:
@@ -575,13 +581,16 @@ class GASpyRegressor(object):
         return predictions
 
 
-    def parity_plot(self, split=False, xlabel=None, ylabel=None, title=None, lims=None):
+    def parity_plot(self, split=False, jupyter=True,
+                    xlabel=None, ylabel=None, title=None, lims=None):
         '''
         Create a parity plot of the model that's been fit.
 
         Input:
             split   A boolean indicating whether you want to plot train and test
                     separately or together
+            jupyter A boolean that you pass to tell this class whether you are
+                    in a Jupyter notebook or not. This will change how it displays.
             xlabel  A string for the x-axis label
             ylabel  A string for the y-axis label
             title   A string for the title name. If `default`,
@@ -590,8 +599,8 @@ class GASpyRegressor(object):
                     which to create the parity line.
         '''
         # pylint: disable=no-member, too-many-arguments
-        # Enter notebook mode. Really only works in Jupyter
-        init_notebook_mode(connected=True)
+        if jupyter:
+            init_notebook_mode(connected=True)
 
         # Establish defaults
         if not title:
@@ -624,12 +633,18 @@ class GASpyRegressor(object):
                 errors = self.errors[block][dataset]
                 # Calculate the model's prediction
                 y_hat = y - errors
+                # Concatenate the mongo documents into strings that we can use to
+                # label each data point
+                text = ['']*len(p_docs.values()[0])
+                for fingerprint, values in p_docs.iteritems():
+                    for i, value in enumerate(values):
+                        text[i] += '<br>' + str(fingerprint) + ':  ' + str(value)
 
                 # Make the scatter plots
                 traces.append(go.Scatter(x=y, y=y_hat,
                                          name=str((block, dataset)),
                                          mode='markers',
-                                         text='foo'))
+                                         text=text))
         # Make a parity line
         traces.append(go.Scatter(x=lims, y=lims,
                                  name='parity line',
