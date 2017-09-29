@@ -68,7 +68,7 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
     # Some of our defaults need to be lists, which are mutable. So we define them
     # down here.
     if fp_blocks == 'default':
-        fp_blocks = ['mpid', 'miller']
+        fp_blocks = ['mpid', 'miller','top']
 
     # Load the literature volcano data
     volcano, x_expt, y_expt, label_expt = \
