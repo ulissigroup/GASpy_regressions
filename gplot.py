@@ -63,12 +63,19 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         All of the other inputs are filter settings for the data that we want
         to pull from the database of results. These only matter when
         `include_results == True`.
+    Outputs:
+        cat_pdocs   The parsed mongo documents of the filtered catalog
+        x_cat       The regressor's predicitons for whatever descriptor we chose
+        ads_pdocs   The parsed mongo documents of the filtered results database
+                    Only returns if `include_results == True`
+        x_ads       The simulated values for whatever descriptor we chose.
+                    Only returns if `include_results == True`
     '''
     # pylint: disable=too-many-arguments, no-member
     # Some of our defaults need to be lists, which are mutable. So we define them
     # down here.
     if fp_blocks == 'default':
-        fp_blocks = ['mpid', 'miller','top']
+        fp_blocks = ['mpid', 'miller', 'top']
 
     # Load the literature volcano data
     volcano, x_expt, y_expt, label_expt = \
@@ -127,8 +134,15 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
     layout = go.Layout(xaxis=dict(title=xlabel),
                        yaxis=yaxis,
                        title=title)
-    init_notebook_mode(connected=True)
+    if jupyter:
+        init_notebook_mode(connected=True)
     iplot(go.Figure(data=traces, layout=layout))
+
+    # Return some things
+    if include_results:
+        return cat_pdocs, x_cat
+    else:
+        return cat_pdocs, x_cat, ads_pdocs, x_ads
 
 
 def _minimize_over(fingerprints, p_docs, values):
