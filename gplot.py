@@ -113,8 +113,13 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
 
     # Catalog documents don't have any information about adsorbates. But if our model
     # requires information about adsorbates, then we probably need to put it in.
-    if 'ads' in regressor.features:
-        cat_pdocs['adsorbates'] = [[adsorbate]]*len(cat_docs)
+    # Note that we have an EAFP wrapper to check whether our model is hierarchical or not.
+    try:
+        features = regressor.features + regressor.features_inner
+    except AttributeError:
+        features = regressor.features
+    if 'ads' in features:
+        cat_pdocs['adsorbates'] = [[adsorbate]] * len(cat_docs)
     # Create the regressor's prediction
     cat_x = regressor.predict(cat_pdocs, regressor_block)
 

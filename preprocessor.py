@@ -6,7 +6,7 @@ vectors that are meant to be fed into regressors.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
-import pdb
+import pdb  # noqa:  F401
 import copy
 from collections import OrderedDict
 import numpy as np
@@ -49,7 +49,7 @@ class GASpyPreprocessor(object):
         # Create the preprocessors for each feature
         self.preprocessors = OrderedDict.fromkeys(features)
         for feature in features:
-            self.preprocessors[feature] = getattr(self, '_'+feature)()
+            self.preprocessors[feature] = getattr(self, '_' + feature)()
 
         # Partially preprocess the fingerprints
         numerical_features = [preprocessor(p_docs) for preprocessor in self.preprocessors.values()]
@@ -220,6 +220,67 @@ class GASpyPreprocessor(object):
         return preprocess_ads
 
 
+    def _neighbors_coordcounts(self, p_docs=None):
+        '''
+        Create a preprocessing function for the coordination counts of the adsorbate's neighebors.
+        This is just like `_coordcount`, but will have a vector for each of the neighbors instead
+        of one vector for the adsorbate itself.
+
+        Input:
+            p_docs  Parsed mongo dictionaries. Default value of `None` yields `self.p_docs`
+        Output:
+            preprocess_rnnc_count   Function to preprocess parsed mongo docs into
+                                    an array of binary vectors
+        '''
+        if not p_docs:
+            p_docs = copy.deepcopy(self.p_docs)
+
+        # Create a label binarizer to convert a single symbol string into a vector of binaries
+        preprocess_coordcount, lb = self._coordcount(p_docs, return_lb=True)
+
+        def preprocess_neighbors_coordcounts(p_docs):
+            '''
+            We do the same thing that we do in the `_coordcount` method, but for
+            `neighborcoord` instead.
+            '''
+            # Initialize the output
+            neighbors_coordcounts = []
+
+            # We'll be doing this action a lot. Let's wrap it.
+            def _calc_coordcount(coord):
+                ''' Turn a `coord` string into a list of integers, i.e., coordcount '''
+                return np.sum(lb.transform(coord.split('-')), axis=0)
+
+            # Unpack the data. `ncoords` is a list of neighborcoord values, and
+            # n_symbols is the total number of symbols we'll be considering
+            ncoords = p_docs['neighborcoord']
+            n_symbols = len(_calc_coordcount(''))
+
+            # Calculate
+            for coord_strings in ncoords:
+                # Initialize `coordcount_array`, which will be an array of integers
+                # whose rows will correspond to the cumulative coordcounts of each
+                # respective element
+                coordcount_array = np.zeros((n_symbols, n_symbols), dtype=np.int64)
+                # Add the coordcount vector for each neighbor
+                for coord_string in coord_strings:
+                    # Unpack the information and then calculate the coordcount for this neighbor
+                    neighbor, coord = coord_string.split(':')
+                    coordcount = _calc_coordcount(coord)
+                    # Find the row within the array that this neighbor should map to
+                    neighbors_index, = np.where(_calc_coordcount(neighbor) == 1)
+                    # Add the coordcount to the array
+                    coordcount_array[neighbors_index, :] += np.array(coordcount)
+                # Flatten the array into a vector so that our regressors can use it,
+                # and then add it to the output
+                coordcount_vector = np.concatenate(coordcount_array, axis=0)
+                neighbors_coordcounts.append(coordcount_vector)
+
+            return neighbors_coordcounts
+
+        return preprocess_neighbors_coordcounts
+
+
     # TODO:  Create this method
     def _gcn(self, p_docs=None):
         raise Exception('This method has not been created yet')
@@ -265,7 +326,7 @@ class GASpyPreprocessor(object):
 
             # Initialize a list of strings. Each of these strings will be concatenated
             # strings of all of the fingerprints present in `p_docs`
-            strs = ['']*n_data
+            strs = [''] * n_data
 
             # Perform the concatenation, then hash all the entries
             for fingerprint, values in p_docs.iteritems():

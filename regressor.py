@@ -150,16 +150,19 @@ class GASpyRegressor(object):
         fingerprints['mongo_id'] = '$_id'
         # Some features require specific fingerprints. Here, we make sure that those
         # fingerprints are included
-        if 'coordcount' in features:
-            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            fingerprints['symbols'] = '$atoms.chemical_symbols'
-        if 'rnnc_count' in features:
-            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
-            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            fingerprints['symbols'] = '$atoms.chemical_symbols'
-            fingerprints['nnc'] = '$processed_data.fp_init.nextnearestcoordination'
         if 'ads' in features:
             fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
+        if 'coordcount' in features:
+            fingerprints['symbols'] = '$atoms.chemical_symbols'
+            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
+        if 'rnnc_count' in features:
+            fingerprints['symbols'] = '$atoms.chemical_symbols'
+            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
+            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
+        if 'neighbors_coordcounts' in features:
+            fingerprints['symbols'] = '$atoms.chemical_symbols'
+            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
+            fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
         if 'hash' in features:
             fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
             fingerprints['miller'] = '$processed_data.calculation_info.miller'
@@ -181,9 +184,9 @@ class GASpyRegressor(object):
             if 'coordination' in blocks:
                 fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             if 'nextnearestcoordination' in blocks:
-                fingerprints['nextnearestcoordination'] = '$processed_data.fp_init.nextnearestcoordination'
+                fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
             if 'neighborcoord' in blocks:
-                fingerprints['neighborcoord'] = '$processed_data.fp_init.neighborcoord'
+                fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
 
         # Some responses require specific queries. Here, we make sure that the correct
         # queries are defined
@@ -569,7 +572,7 @@ class GASpyRegressor(object):
         '''
         # First, assume that the model is hierarchical.
         try:
-            inner_features = self.pp_inner(p_docs)
+            inner_features = self.pp_inner.transform(p_docs)
             outer_features = self.pp.transform(p_docs)
             predictions = self._predict(inner_features, outer_features, block=block)
 
