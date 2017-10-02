@@ -43,7 +43,8 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
                             which block you want to use to make the predictions. This
                             will probably be a tuple of strings, like ('CO',).
         fp_blocks           A list of fingerprints over which to find minima
-                            (reference the `_minimize_over` function).
+                            (reference the `_minimize_over` function). If you don't want to
+                            block at all, then you may set it to `None`
         scale               A string indicating the scale of the volcano you want to read/make.
                             'linear' or 'logarithmic' are good guesses.
         title               A string for the plot title
@@ -65,13 +66,13 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         `include_results == True`.
     Outputs:
         cat_pdocs   The parsed mongo documents of the filtered catalog
-        x_cat       The regressor's predicitons for whatever descriptor we chose
+        cat_x       The regressor's predicitons for whatever descriptor we chose
         ads_pdocs   The parsed mongo documents of the filtered results database
                     Only returns if `include_results == True`
-        x_ads       The simulated values for whatever descriptor we chose.
+        ads_x       The simulated values for whatever descriptor we chose.
                     Only returns if `include_results == True`
     '''
-    # pylint: disable=too-many-arguments, no-member
+    # pylint: disable=too-many-arguments, no-member, too-many-statements, too-many-branches
     # Some of our defaults need to be lists, which are mutable. So we define them
     # down here.
     if fp_blocks == 'default':
@@ -90,42 +91,73 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         # by specifying a lot of filters.
         with utils.get_adsorption_db() as ads_client:
             fingerprints = defaults.fingerprints(simulated=True)    # pylint: disable=E1123
-            _, ads_pdocs = utils.get_docs(ads_client, 'adsorption',
-                                          adsorbates=[adsorbate],
-                                          fingerprints=fingerprints,
-                                          vasp_settings=vasp_settings,
-                                          energy_min=energy_min,
-                                          energy_max=energy_max,
-                                          f_max=f_max,
-                                          ads_move_max=ads_move_max,
-                                          bare_slab_move_max=bare_slab_move_max,
-                                          slab_move_max=slab_move_max)
-            x_ads = ads_pdocs[descriptor]
+            ads_docs, ads_pdocs = utils.get_docs(ads_client, 'adsorption',
+                                                 adsorbates=[adsorbate],
+                                                 fingerprints=fingerprints,
+                                                 vasp_settings=vasp_settings,
+                                                 energy_min=energy_min,
+                                                 energy_max=energy_max,
+                                                 f_max=f_max,
+                                                 ads_move_max=ads_move_max,
+                                                 bare_slab_move_max=bare_slab_move_max,
+                                                 slab_move_max=slab_move_max)
+            ads_x = np.array(ads_pdocs[descriptor])
         cat_docs, cat_pdocs = utils.unsimulated_catalog(adsorbates=[adsorbate],
                                                         vasp_settings=vasp_settings,
                                                         fingerprints=defaults.fingerprints())
     # If we're including only the catalog, then pull only the catalog information
     else:
         with utils.get_catalog_db() as cat_client:
-            _, cat_pdocs = utils.get_docs(cat_client, 'catalog',
-                                          fingerprints=defaults.fingerprints())
+            cat_docs, cat_pdocs = utils.get_docs(cat_client, 'catalog',
+                                                 fingerprints=defaults.fingerprints())
 
     # Catalog documents don't have any information about adsorbates. But if our model
     # requires information about adsorbates, then we probably need to put it in.
     if 'ads' in regressor.features:
         cat_pdocs['adsorbates'] = [[adsorbate]]*len(cat_docs)
     # Create the regressor's prediction
-    x_cat = regressor.predict(cat_pdocs, regressor_block)
+    cat_x = regressor.predict(cat_pdocs, regressor_block)
+
+    # Filter the data over each fingerprint block, as per the `_minimize_over` function.
+    if fp_blocks:
+        if include_results:
+            # If we are including the results, then we need to pool the catalog and results
+            # together before finding the minima. This ensures that each block will only
+            # have one data point show up on the plot. But before we pool them together,
+            # we add a new "fingerprint" to their p_docs so that we can keep track of which
+            # data come from where after they've been pooled.
+            for i, doc in enumerate(cat_docs):
+                doc['catalog?'] = True
+                cat_docs[i] = doc
+            for i, doc in enumerate(ads_docs):
+                doc['catalog?'] = False
+                ads_docs[i] = doc
+            pooled_x = np.concatenate((cat_x, ads_x), axis=0)
+            pooled_docs = cat_docs + ads_docs
+            # After pooling, we call `_minimizer_over`
+            pooled_docs, pooled_x = _minimize_over(fp_blocks, pooled_docs, pooled_x)
+            # Now un-pool so that we can differentiate the data in the final plot
+            cat_x = []
+            ads_x = []      # pylint: disable=redefined-variable-type
+            cat_docs = []
+            ads_docs = []
+            for i, x in enumerate(pooled_x):
+                if pooled_docs[i]['catalog?']:
+                    cat_x.append(x)
+                    cat_docs.append(pooled_docs[i])
+                else:
+                    ads_x.append(x)
+                    ads_docs.append(pooled_docs[i])
+        else:
+            cat_docs, cat_x = _minimize_over(fp_blocks, cat_docs, cat_x)
 
     # Plot the experimental data points, the regressor's predictions, and then
     # (if necessary) the results from the database
     traces = [go.Scatter(x=x_expt, y=y_expt, name='Experimental points',
                          mode='markers', text=label_expt)]
-    traces.append(_make_trace(x_cat, volcano, cat_pdocs, label='Regressor predictions',
-                              fp_blocks=fp_blocks))
+    traces.append(_make_trace(cat_x, volcano, cat_docs, label='Regressor predictions'))
     if include_results:
-        traces.append(_make_trace(x_ads, volcano, ads_pdocs, label='Simulations',
-                                  fp_blocks=fp_blocks))
+        traces.append(_make_trace(ads_x, volcano, ads_docs, label='Simulations'))
 
     # Format and display
     yaxis = dict(title=ylabel)
@@ -138,14 +170,14 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         init_notebook_mode(connected=True)
     iplot(go.Figure(data=traces, layout=layout))
 
-    # Return some things
+    # Return some things in case the user wants to save them for later
     if include_results:
-        return cat_pdocs, x_cat
+        return cat_pdocs, cat_x
     else:
-        return cat_pdocs, x_cat, ads_pdocs, x_ads
+        return cat_docs, cat_x, ads_docs, ads_x
 
 
-def _minimize_over(fingerprints, p_docs, values):
+def _minimize_over(fingerprints, docs, values):
     '''
     In some cases, we do not want to plot all of our data. We would rather
     plot only data that represent minima within certain blocks or fingerprints.
@@ -163,11 +195,11 @@ def _minimize_over(fingerprints, p_docs, values):
     Inputs:
         fingerprints    A list of strings for the fingerprints that you want
                         to block within
-        p_docs          A dictionary of arrays, AKA "parsed mongo documents". See
-                        `gaspy.utils.get_docs` for more details.
+        docs            A list of dictionaries, AKA mongo documents.
+                        See `gaspy.utils.get_docs` for more details.
         values          A np.array of floats over which to perform the minimization
     Outputs:
-        min_pdocs       The filtered version of `p_docs`
+        min_pdocs       The filtered version of `docs`
         min_values      The filtered version of `values`
     '''
     # We're going to parse our data into a dictionary, `block_data`, whose keys
@@ -180,7 +212,7 @@ def _minimize_over(fingerprints, p_docs, values):
     for i, value in enumerate(values):
         # Note that we turn the fingerprints into strings to make sure iterables
         # (like lists for miller indices) don't start doing funny things to our code.
-        block = tuple([str(p_docs[fingerprint][i]) for fingerprint in fingerprints])
+        block = tuple([str(docs[i][fingerprint]) for fingerprint in fingerprints])
         # EAFP to either append a new entry to an existing block, or create a new block
         try:
             block_data[block].append((i, value))
@@ -197,16 +229,18 @@ def _minimize_over(fingerprints, p_docs, values):
         indices[data[min_block_index][0]] = None
 
     # Now filter the inputs to create the outputs
-    min_values = np.array([value for i, value in enumerate(values) if i in indices])
-    min_pdocs = dict.fromkeys(p_docs)
-    for fingerprint, fp_values in p_docs.iteritems():
-        min_pdocs[fingerprint] = np.array([element for i, element in enumerate(fp_values)
-                                           if i in indices])
+    min_values = []
+    min_docs = []
+    for i, value in enumerate(values):
+        if i in indices:
+            min_values.append(value)
+            min_docs.append(docs[i])
+    min_values = np.array(min_values)
 
-    return min_pdocs, min_values
+    return min_docs, min_values
 
 
-def _make_trace(x, predictor, p_docs, label, fp_blocks=None):
+def _make_trace(x, predictor, docs, label):
     '''
     This function creates a plotly "trace"
 
@@ -215,24 +249,22 @@ def _make_trace(x, predictor, p_docs, label, fp_blocks=None):
         predictor   A function that can accept `x` and predict the appropriate values
                     for the y-axis. For example:  This could be a function
                     that can predict activity from adsorption energies.
-        p_docs      The corresponding "parsed mongo documents" that go with `x`.
+        docs        The corresponding "mongo documents" that go with `x`.
                     Refer to `gaspy.utils.get_docs` for more details.
         label       A string indicating how you want this trace to be... labeled.
     Output
         trace   A plotly graph object that you can add to a list of traces
     '''
-    # Filter the data as per `_minimize_over` function
-    if fp_blocks:
-        p_docs, x = _minimize_over(fp_blocks, p_docs, x)
-
     # Use the predictor to... predict
     y = predictor(x)
 
     # Concatenate the parsed mongo documents into strings to include as hovertext
-    hover_text = ['']*len(p_docs.values()[0])
-    for fingerprint, values in p_docs.iteritems():
-        for i, value in enumerate(values):
-            hover_text[i] += '<br>' + str(fingerprint) + ':  ' + str(value)
+    hover_text = []
+    for doc in docs:
+        text = ''
+        for fingerprint, fp_value in doc.iteritems():
+            text += '<br>' + str(fingerprint) + ':  ' + str(fp_value)
+        hover_text.append(text)
 
     # Add the catalog data to the plot
     trace = go.Scatter(x=x, y=y, name=label,    # pylint: disable=no-member
