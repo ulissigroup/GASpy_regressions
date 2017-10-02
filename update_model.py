@@ -37,8 +37,8 @@ fingerprints = {'neighborcoord': '$processed_data.fp_final.neighborcoord'}
 # In[ ]:
 
 tpot = TPOTRegressor(
-                     generations=1,
-                     population_size=2,
+                     generations=4,
+                     population_size=16,
                      verbosity=2,
                      random_state=42,
                     )
