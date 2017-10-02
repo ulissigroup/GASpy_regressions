@@ -15,10 +15,18 @@ def dump(regressor, fname=None):
     GASpyRegressor and create a file name from its attributes.
     '''
     if not fname:
-        fname = __concatenate(regressor.model_name,
-                              regressor.features,
-                              regressor.responses,
-                              regressor.blocks)
+        # If it's a hierarchical model, then we need to save both feature sets
+        try:
+            fname = __concatenate(regressor.model_name,
+                                  regressor.features_inner + regressor.features,
+                                  regressor.responses,
+                                  regressor.blocks)
+        # If it's not hierarchical, then proceed as normal
+        except AttributeError:
+            fname = __concatenate(regressor.model_name,
+                                  regressor.features,
+                                  regressor.responses,
+                                  regressor.blocks)
 
     with open(fname, 'wb') as f:
         pickle.dump(regressor, f)
