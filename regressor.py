@@ -262,7 +262,7 @@ class GASpyRegressor(object):
             # Warn the user if they're trying to block by something that they might not
             # be pulling
             for block in blocks:
-                if block not in fingerprints:
+                if block not in self.p_docs['no_block'][dataset]:
                     warnings.warn('You are trying to block by %s, but we did not find that fingerprint'
                                   % block)
 
