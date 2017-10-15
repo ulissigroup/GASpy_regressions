@@ -24,6 +24,8 @@ from sklearn import metrics
 from sklearn.model_selection import train_test_split
 from plotly.offline import init_notebook_mode, plot, iplot
 import plotly.graph_objs as go
+import matplotlib
+from matplotlib import pyplot as plt
 from preprocessor import GASpyPreprocessor
 sys.path.append('..')
 from gaspy import utils
@@ -584,8 +586,9 @@ class GASpyRegressor(object):
         return predictions
 
 
-    def parity_plot(self, split=False, jupyter=True,
-                    xlabel=None, ylabel=None, title=None, lims=None):
+    def parity_plot(self, split=False, jupyter=True, plotter='plotly',
+                    xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
+                    fname='parity.png', s=None, font=None):
         '''
         Create a parity plot of the model that's been fit.
 
@@ -594,15 +597,30 @@ class GASpyRegressor(object):
                     separately or together
             jupyter A boolean that you pass to tell this class whether you are
                     in a Jupyter notebook or not. This will change how it displays.
+            plotter A string indicating the plotting tool you want to use. It can
+                    be 'plotly' or 'matplotlib'
             xlabel  A string for the x-axis label
             ylabel  A string for the y-axis label
             title   A string for the title name. If `default`,
                     it turns into a string made up of class attributes.
             lims    A list whose elements decide the bounds within
                     which to create the parity line.
+            shift   A float indicating how far you want to shift the energy values.
+                    This is useful for when you are adding entropic contributions
+                    to zero point energies.
+            fname   A string indicating the file name you want to save the figure as.
+                    Only works when plotter == 'matplotlib'
+            s       An integer (or float?) indicating the size of the marker you
+                    want to use. Only works when plotter == 'matplotlib'
+            font    A dictionary that matplotlib accepts to establish the fonts you
+                    want to use. Only w orks when plotter == 'matplotlib'
+        Outputs:
+            x       The values of the x-axis that you plot
+            y       The values of the y-axis that you plot
+            text    The values of the hovertext that you plot
         '''
         # pylint: disable=no-member, too-many-arguments
-        if jupyter:
+        if jupyter and plotter == 'plotly':
             init_notebook_mode(connected=True)
 
         # Establish defaults
@@ -614,6 +632,8 @@ class GASpyRegressor(object):
             xlabel = 'Simulated %s' % tuple(self.responses)
         if not ylabel:
             ylabel = 'Regressed %s' % tuple(self.responses)
+        if not font:
+            font = {'family': 'sans', 'style': 'normal', 'size': 20}
 
         print('RMSE values:')
         utils.print_dict(self.rmses, indent=1)
@@ -636,25 +656,50 @@ class GASpyRegressor(object):
                 errors = self.errors[block][dataset]
                 # Calculate the model's prediction
                 y_hat = y - errors
-                # Concatenate the mongo documents into strings that we can use to
-                # label each data point
-                text = ['']*len(p_docs.values()[0])
-                for fingerprint, values in p_docs.iteritems():
-                    for i, value in enumerate(values):
-                        text[i] += '<br>' + str(fingerprint) + ':  ' + str(value)
+                # Perform the shifting
+                y = y + shift
+                y_hat = y_hat + shift
 
-                # Make the scatter plots
-                traces.append(go.Scatter(x=y, y=y_hat,
-                                         name=str((block, dataset)),
-                                         mode='markers',
-                                         text=text))
+                # Plot it
+                if plotter == 'plotly':
+                    # If we're using plotly, then add hovertext, `text`
+                    text = ['']*len(p_docs.values()[0])
+                    for fingerprint, values in p_docs.iteritems():
+                        for i, value in enumerate(values):
+                            text[i] += '<br>' + str(fingerprint) + ':  ' + str(value)
+                    traces.append(go.Scatter(x=y, y=y_hat,
+                                             name=str((block, dataset)),
+                                             mode='markers',
+                                             text=text))
+                elif plotter == 'matplotlib':
+                    plt.scatter(y, y_hat, s=s)
+                else:
+                    raise Exception('"%s" is an unrecognized argument for "plotter"', plotter)
+
         # Make a parity line
-        traces.append(go.Scatter(x=lims, y=lims,
-                                 name='parity line',
-                                 line=dict(color=('black'), dash='dash')))
+        if plotter == 'plotly':
+            traces.append(go.Scatter(x=lims, y=lims,
+                                     name='parity line',
+                                     line=dict(color=('black'), dash='dash')))
+        elif plotter == 'matplotlib':
+            plt.plot(lims, lims, 'k--')
 
         # Format and show the plot
-        layout = go.Layout(xaxis=dict(title=xlabel),
-                           yaxis=dict(title=ylabel),
-                           title=title)
-        iplot(go.Figure(data=traces, layout=layout))
+        if plotter == 'plotly':
+            layout = go.Layout(xaxis=dict(title=xlabel),
+                               yaxis=dict(title=ylabel),
+                               title=title)
+            iplot(go.Figure(data=traces, layout=layout))
+        elif plotter == 'matplotlib':
+            matplotlib.rc('font', **font)
+            plt.xlabel(xlabel)
+            plt.ylabel(ylabel)
+            plt.xlim(lims)
+            plt.ylim(lims)
+            plt.savefig(fname, bbox_inches='tight')
+            plt.show()
+
+        if plotter == 'plotly':
+            return y, y_hat, text
+        elif plotter == 'matplotlib':
+            return y, y_hat

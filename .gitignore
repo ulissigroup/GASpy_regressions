@@ -11,3 +11,5 @@
 .ipynb_checkpoints
 .DS_Store
 *.xlsx
+*.png
+*.jpg
