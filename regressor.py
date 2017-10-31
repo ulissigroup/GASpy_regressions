@@ -10,8 +10,7 @@ and `parity_plot` methods.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
-import pdb
-from pprint import pprint
+import pdb  # noqa:  F401
 import itertools
 import copy
 import sys
@@ -144,7 +143,7 @@ class GASpyRegressor(object):
 
         # Python doesn't like dictionaries being used as default values, so we initialize here
         if not vasp_settings:
-            vasp_setings = utils.vasp_settings_to_str({})
+            vasp_settings = utils.vasp_settings_to_str({})
         if not fingerprints:
             fingerprints = {}
 
@@ -160,7 +159,7 @@ class GASpyRegressor(object):
         if 'rnnc_count' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
+            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'  # noqa:  E501
         if 'neighbors_coordcounts' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
@@ -170,7 +169,7 @@ class GASpyRegressor(object):
             fingerprints['miller'] = '$processed_data.calculation_info.miller'
             fingerprints['top'] = '$processed_data.calculation_info.top'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
+            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'  # noqa: E501
             fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
         # If we want to block by some fingerprint, then we had better pull it out.
         # Here are some common ones to make life easy.
@@ -186,7 +185,7 @@ class GASpyRegressor(object):
             if 'coordination' in blocks:
                 fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             if 'nextnearestcoordination' in blocks:
-                fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
+                fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'  # noqa: E501
             if 'neighborcoord' in blocks:
                 fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
 
@@ -230,9 +229,9 @@ class GASpyRegressor(object):
         # Split the inputs and outputs. We also pull out indices for splitting so
         # that we can split `p_docs`
         x_train, x_test, y_train, y_test, indices_train, indices_test = \
-                train_test_split(x, y, range(len(x)),
-                                 train_size=train_size,
-                                 random_state=random_state)
+            train_test_split(x, y, range(len(x)),
+                             train_size=train_size,
+                             random_state=random_state)
         p_docs_train = {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()}
         p_docs_test = {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()}
 
@@ -259,13 +258,13 @@ class GASpyRegressor(object):
             if 'adsorbate' in blocks:
                 for dataset in self.p_docs['no_block']:
                     self.p_docs['no_block'][dataset]['adsorbate'] = \
-                            [adsorbates[0] for adsorbates in self.p_docs['no_block'][dataset]['adsorbates']]
+                            [adsorbates[0] for adsorbates in self.p_docs['no_block'][dataset]['adsorbates']]  # noqa:  E501
 
             # Warn the user if they're trying to block by something that they might not
             # be pulling
             for block in blocks:
                 if block not in self.p_docs['no_block'][dataset]:
-                    warnings.warn('You are trying to block by %s, but we did not find that fingerprint'
+                    warnings.warn('You are trying to block by %s, but we did not find that fingerprint'  # noqa:  E501
                                   % block)
 
             # `block_values` is a list of sublists, where each sublist contains all of the unique
@@ -275,7 +274,7 @@ class GASpyRegressor(object):
             # [['O', 'CO'], ['Top', 'Bottom']]. We use block_values to create `block_list`.
             block_values = []
             for block in blocks:
-                block_values.append(np.unique(self.p_docs['no_block']['train+test'][block]).tolist())   # pylint: disable=E1101
+                block_values.append(np.unique(self.p_docs['no_block']['train+test'][block]).tolist())   # noqa:  E501, pylint: disable=E1101
             self.block_list = [block for block in itertools.product(*block_values)]
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
@@ -317,7 +316,7 @@ class GASpyRegressor(object):
 
         # If `_data` is an np.array, then treat it as such. This probably means
         # that `_data` is either `x` or `y`
-        if dtype == type(np.array([])):
+        if isinstance(dtype, type(np.array([]))):
             for dataset, _data in data.iteritems():
                 fdata = [datum for i, datum in enumerate(_data)
                          if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
@@ -398,6 +397,7 @@ class GASpyRegressor(object):
         self._predict = _predict
         self.rmses = rmses
         self.errors = errors
+        self.models = models
 
 
     def fit_tpot(self, regressor, x_dict=None, y_dict=None, blocks=None, model_name=None):
@@ -463,6 +463,7 @@ class GASpyRegressor(object):
         self._predict = _predict
         self.rmses = rmses
         self.errors = errors
+        self.models = models
 
 
     # TODO:  Write this part. Try to figure out/remember how to get the lambda function
@@ -527,10 +528,11 @@ class GASpyRegressor(object):
         try:
             self.features_inner = copy.deepcopy(self.features)
             self.x_inner = copy.deepcopy(self.x)
-            self.pp_inner = copy.deepcopy(self.pp)  # pylint: disable=access-member-before-definition
+            self.pp_inner = copy.deepcopy(self.pp)  # noqa: E501, pylint: disable=access-member-before-definition
             self._predict_inner = copy.deepcopy(self._predict)
             self.rmses_inner = copy.deepcopy(self.rmses)
             self.errors_inner = copy.deepcopy(self.errors)
+            self.models_inner = copy.deepcopy(self.models)
         except AttributeError:
             raise AttributeError('You tried to fit an outer model without fitting an inner model')
         # Pull out p_docs (for ease of reading)
@@ -540,7 +542,7 @@ class GASpyRegressor(object):
         try:
             pp = GASpyPreprocessor(p_docs['no_block']['train+test'], outer_features)
         except KeyError:
-            raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')
+            raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')  # noqa:  E501
         # Preprocess p_docs again, but this time for the outer regressor
         x = copy.deepcopy(self.x_inner)
         for block in x:
@@ -586,7 +588,7 @@ class GASpyRegressor(object):
         return predictions
 
 
-    def parity_plot(self, split=False, jupyter=True, plotter='plotly',
+    def parity_plot(self, split=False, jupyter=True, plotter='plotly',  # noqa:  E501, pylint: disable=too-many-statements, too-many-branches
                     xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
                     fname='parity.png', s=None, font=None):
         '''
@@ -650,7 +652,7 @@ class GASpyRegressor(object):
                 datasets = ['train+test']
             for dataset in datasets:
                 # Unpack data from the class attributes
-                x = self.x[block][dataset]
+                x = self.x[block][dataset]  # noqa:  F841
                 y = self.y[block][dataset]
                 p_docs = self.p_docs[block][dataset]
                 errors = self.errors[block][dataset]
@@ -699,6 +701,7 @@ class GASpyRegressor(object):
             plt.savefig(fname, bbox_inches='tight')
             plt.show()
 
+        # TODO:  Return all blocks of information, not just the latest block
         if plotter == 'plotly':
             return y, y_hat, text
         elif plotter == 'matplotlib':
