@@ -9,8 +9,58 @@ __email__ = 'ktran@andrew.cmu.edu'
 import pdb  # noqa:  F401
 import copy
 from collections import OrderedDict
+import multiprocessing
+from functools import partial
 import numpy as np
 from sklearn import preprocessing
+
+
+def coord_to_coordcount(lb, x):
+    '''
+    Convert a single coordination string into a vector of elemental coordination counts.
+    Note that this is a module function so that we can call it with the `multiprocessing`
+    module.
+
+    Inputs:
+        lb  Label binarizing object with a `transform` method to convert a list of strings
+            into an array of coordination counts
+        x   A string indicating the coordination you want to vectorize
+    Output:
+        A numpy vector for coordination count
+    '''
+    return np.sum(lb.transform(x.split('-')), axis=0)
+
+
+def coord_to_neighborcoordcount(n_symbols, lb, coord_strings):
+    '''
+    Convert a list of coordination strings into an array of elemental coordination counts.
+    Note that this is a module function so that we can call it with the `multiprocessing`
+    module.
+
+    Inputs:
+        n_symbols       The number of elements we are considering
+        lb              Label binarizing object with a `transform` method to convert a
+                        list of strings into an array of coordination counts
+        coord_strings   A list of strings `neighborcoord` strings
+    '''
+    # Initialize
+    coordcount_array = np.zeros((n_symbols, n_symbols), dtype=np.int64)
+
+    for coord_string in coord_strings:
+        # Unpack the information and then calculate the coordcount for this neighbor
+        neighbor, coord = coord_string.split(':')
+        coordcount = coord_to_coordcount(lb, coord)
+
+        # Find the row within the array that this neighbor should map to, then add
+        # the coordcount to the array
+        neighbors_index, = np.where(coord_to_coordcount(lb, neighbor) == 1)
+        coordcount_array[neighbors_index, :] += np.array(coordcount)
+
+        # Flatten the array into a vector so that our regressors can use it,
+        # and then add it to the output
+        coordcount_vector = np.concatenate(coordcount_array, axis=0)
+
+    return coordcount_vector
 
 
 class GASpyPreprocessor(object):
@@ -144,9 +194,13 @@ class GASpyPreprocessor(object):
             '''
             # Unpack
             coords = p_docs['coordination']
-            # Calculate
-            coordcounts = np.array([np.sum(lb.transform(coord.split('-')), axis=0)
-                                    for coord in coords])
+
+            #pool = multiprocessing.pool.Pool(16)
+            #coordcounts = pool.map(partial(coord_to_coordcount, lb), coords)
+            #pool.close()
+            coordcounts = map(partial(coord_to_coordcount, lb), coords)
+
+            coordcounts = np.array(coordcounts)
             return coordcounts
 
         if not return_lb:
@@ -256,25 +310,12 @@ class GASpyPreprocessor(object):
             ncoords = p_docs['neighborcoord']
             n_symbols = len(_calc_coordcount(''))
 
-            # Calculate
-            for coord_strings in ncoords:
-                # Initialize `coordcount_array`, which will be an array of integers
-                # whose rows will correspond to the cumulative coordcounts of each
-                # respective element
-                coordcount_array = np.zeros((n_symbols, n_symbols), dtype=np.int64)
-                # Add the coordcount vector for each neighbor
-                for coord_string in coord_strings:
-                    # Unpack the information and then calculate the coordcount for this neighbor
-                    neighbor, coord = coord_string.split(':')
-                    coordcount = _calc_coordcount(coord)
-                    # Find the row within the array that this neighbor should map to
-                    neighbors_index, = np.where(_calc_coordcount(neighbor) == 1)
-                    # Add the coordcount to the array
-                    coordcount_array[neighbors_index, :] += np.array(coordcount)
-                # Flatten the array into a vector so that our regressors can use it,
-                # and then add it to the output
-                coordcount_vector = np.concatenate(coordcount_array, axis=0)
-                neighbors_coordcounts.append(coordcount_vector)
+            #pool = multiprocessing.pool.Pool(16)
+            #neighbors_coordcounts = pool.map(partial(coord_to_neighborcoordcount, n_symbols, lb),
+            #                                 ncoords)
+            #pool.close()
+            neighbors_coordcounts = map(partial(coord_to_neighborcoordcount, n_symbols, lb),
+                                        ncoords)
 
             return neighbors_coordcounts
 
