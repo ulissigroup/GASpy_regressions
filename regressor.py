@@ -5,7 +5,6 @@ GASdb data to instantiate this class, and then call on any of the `fit_*` method
 actually perform the regression on the features. Then you can use the `predict`
 and `parity_plot` methods.
 '''
-# pylint: disable=attribute-defined-outside-init
 
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
@@ -60,13 +59,11 @@ class GASpyRegressor(object):
                         predictions A numpy array. 1st dimension shows different data points,
                                     while the second dimension shows different responses.
     '''
-    # pylint: disable=too-many-instance-attributes
     def __init__(self, features, responses, blocks=None,
                  fingerprints=None, vasp_settings=None,
                  collection='adsorption', energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
                  train_size=0.75, random_state=42):
-        # pylint: disable=too-many-branches, too-many-arguments, too-many-statements
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -221,7 +218,7 @@ class GASpyRegressor(object):
         if len(responses) == 1:
             y = np.array(p_docs[responses[0]])
         elif len(responses) > 1:
-            y = []  # pylint: disable=redefined-variable-type
+            y = []
             for response in responses:
                 y.append(np.array(p_docs[response]))
             y = np.concatenate(tuple(y), axis=1)
@@ -274,7 +271,7 @@ class GASpyRegressor(object):
             # [['O', 'CO'], ['Top', 'Bottom']]. We use block_values to create `block_list`.
             block_values = []
             for block in blocks:
-                block_values.append(np.unique(self.p_docs['no_block']['train+test'][block]).tolist())   # noqa:  E501, pylint: disable=E1101
+                block_values.append(np.unique(self.p_docs['no_block']['train+test'][block]).tolist())   # noqa:  E501
             self.block_list = [block for block in itertools.product(*block_values)]
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
@@ -316,7 +313,7 @@ class GASpyRegressor(object):
 
         # If `_data` is an np.array, then treat it as such. This probably means
         # that `_data` is either `x` or `y`
-        if isinstance(dtype, type(np.array([]))):
+        if isinstance(np.array([]), dtype):
             for dataset, _data in data.iteritems():
                 fdata = [datum for i, datum in enumerate(_data)
                          if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
@@ -354,7 +351,6 @@ class GASpyRegressor(object):
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
         '''
-        # pylint: disable=too-many-arguments
         # Set defaults
         if not x_dict:
             x_dict = self.x
@@ -417,7 +413,6 @@ class GASpyRegressor(object):
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
         '''
-        # pylint: disable=too-many-arguments
         # Set defaults
         if not x_dict:
             x_dict = self.x
@@ -503,7 +498,6 @@ class GASpyRegressor(object):
 
     def fit_hierarchical(self, outer_regressor, outer_method, outer_features,
                          blocks=None, model_name=None):
-        # pylint: disable=too-many-arguments
         '''
         This method will wrap a regression model around the regression that you've already
         fit (using one of the other `fit_*` methods). In other words, it will try to fit
@@ -528,7 +522,7 @@ class GASpyRegressor(object):
         try:
             self.features_inner = copy.deepcopy(self.features)
             self.x_inner = copy.deepcopy(self.x)
-            self.pp_inner = copy.deepcopy(self.pp)  # noqa: E501, pylint: disable=access-member-before-definition
+            self.pp_inner = copy.deepcopy(self.pp)  # noqa: E501
             self._predict_inner = copy.deepcopy(self._predict)
             self.rmses_inner = copy.deepcopy(self.rmses)
             self.errors_inner = copy.deepcopy(self.errors)
@@ -588,7 +582,7 @@ class GASpyRegressor(object):
         return predictions
 
 
-    def parity_plot(self, split=False, jupyter=True, plotter='plotly',  # noqa:  E501, pylint: disable=too-many-statements, too-many-branches
+    def parity_plot(self, split=False, jupyter=True, plotter='plotly',  # noqa:  E501
                     xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
                     fname='parity.png', s=None, font=None):
         '''
@@ -621,7 +615,6 @@ class GASpyRegressor(object):
             y       The values of the y-axis that you plot
             text    The values of the hovertext that you plot
         '''
-        # pylint: disable=no-member, too-many-arguments
         if jupyter and plotter == 'plotly':
             init_notebook_mode(connected=True)
 
@@ -652,7 +645,7 @@ class GASpyRegressor(object):
                 datasets = ['train+test']
             for dataset in datasets:
                 # Unpack data from the class attributes
-                x = self.x[block][dataset]  # noqa:  F841
+                x = self.x[block][dataset]
                 y = self.y[block][dataset]
                 p_docs = self.p_docs[block][dataset]
                 errors = self.errors[block][dataset]
