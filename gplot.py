@@ -72,7 +72,6 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         ads_x       The simulated values for whatever descriptor we chose.
                     Only returns if `include_results == True`
     '''
-    # pylint: disable=too-many-arguments, no-member, too-many-statements, too-many-branches
     # Some of our defaults need to be lists, which are mutable. So we define them
     # down here.
     if fp_blocks == 'default':
@@ -90,7 +89,7 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         # Note that we filter the "bad" documents from the results database
         # by specifying a lot of filters.
         with utils.get_adsorption_db() as ads_client:
-            fingerprints = defaults.fingerprints(simulated=True)    # pylint: disable=E1123
+            fingerprints = defaults.fingerprints(simulated=True)
             ads_docs, ads_pdocs = utils.get_docs(ads_client, 'adsorption',
                                                  adsorbates=[adsorbate],
                                                  fingerprints=fingerprints,
@@ -143,7 +142,7 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
             pooled_docs, pooled_x = _minimize_over(fp_blocks, pooled_docs, pooled_x)
             # Now un-pool so that we can differentiate the data in the final plot
             cat_x = []
-            ads_x = []      # pylint: disable=redefined-variable-type
+            ads_x = []
             cat_docs = []
             ads_docs = []
             for i, x in enumerate(pooled_x):
@@ -272,7 +271,7 @@ def _make_trace(x, predictor, docs, label):
         hover_text.append(text)
 
     # Add the catalog data to the plot
-    trace = go.Scatter(x=x, y=y, name=label,    # pylint: disable=no-member
+    trace = go.Scatter(x=x, y=y, name=label,
                        mode='markers', text=hover_text)
 
     return trace
@@ -305,25 +304,24 @@ def _pull_literature_volcano(excel_file_path, sheetname, scale):
         y       The y-values of the experimental data points
         labels  The string-formatted labels of the experimental data points
     '''
-    # pylint: disable=no-member
     # Pull the dataframe out of Excel
     df = pd.read_excel(excel_file_path, sheetname=sheetname)
     # Pull out the coordinates (x, y) and the labels (labels) of the
     # experimental data points
-    y = df.iloc[:, 0].get_values()
-    x = df.iloc[:, 1].get_values()
-    labels = df.index.tolist()
+    labels = df.iloc[:, 0].get_values()
+    y = df.iloc[:, 1].get_values()
+    x = df.iloc[:, 2].get_values()
     # Do some fancy footwork to find `zenith`, which is the x-value at
     # the zenith of the volcano curve.
-    zi = (df.iloc[:, 2] == 'Zenith')
-    zenith = df.iloc[:, 3][zi].get_values()[0]
+    zi = (df.iloc[:, 3] == 'Zenith')
+    zenith = df.iloc[:, 2][zi].get_values()[0]
     # Find the slope and intercepts of the lines for both the LHS and
     # RHS of the volcano. Note that this is hard-coded, so make sure
     # the Excel file was completed as per the template.
-    lhs_slope = df.iloc[0, 5]
-    lhs_intercept = df.iloc[0, 6]
-    rhs_slope = df.iloc[0, 9]
-    rhs_intercept = df.iloc[0, 10]
+    lhs_slope = df.iloc[0, 6]
+    lhs_intercept = df.iloc[0, 7]
+    rhs_slope = df.iloc[0, 10]
+    rhs_intercept = df.iloc[0, 11]
 
     # All of our volcanos are 2-part functions. This `unpack` function returns
     # the parameters that are appropriate for whichever side of the volcano
