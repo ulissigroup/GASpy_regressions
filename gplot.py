@@ -176,9 +176,9 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
 
     # Return some things in case the user wants to save them for later
     if include_results:
-        return cat_pdocs, cat_x
-    else:
         return cat_docs, cat_x, ads_docs, ads_x
+    else:
+        return cat_pdocs, cat_x
 
 
 def _minimize_over(fingerprints, docs, values):
