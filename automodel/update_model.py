@@ -1,14 +1,13 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 # Importing
 import pdb
 import sys
-from regressor import GASpyRegressor
-import gpickle
-import gplot
+from gaspy_regress.regressor import GASpyRegressor
+from gaspy_regress import gpickle, plot
 sys.path.insert(0, '../')
 from gaspy.utils import vasp_settings_to_str
 
@@ -17,14 +16,14 @@ VASP_SETTINGS = vasp_settings_to_str({'gga': 'RP',
                                       'encut': 350})
 
 
-# In[2]:
+# In[ ]:
 
 import copy
 from tpot import TPOTRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
 
 
-# In[3]:
+# In[ ]:
 
 model_name = 'GP_around_TPOT'
 features = ['coordcount']
@@ -34,12 +33,13 @@ blocks = ['adsorbate']
 fingerprints = {'neighborcoord': '$processed_data.fp_final.neighborcoord'}
 
 
-# In[7]:
+# In[ ]:
 
 tpot = TPOTRegressor(
                      generations=8,
                      population_size=32,
-                     verbosity=1,
+                     verbosity=2,
+                     random_state=42,
                     )
 gp = GaussianProcessRegressor(
                               #kernel= 1.0*RBF(length_scale=0.05) \
@@ -54,12 +54,7 @@ H.fit_tpot(tpot, model_name=model_name)
 H.fit_hierarchical(gp, 'fit_sk', outer_features, model_name=model_name)
 
 
-# In[8]:
-
-gpickle.dump(H)
-
-
 # In[ ]:
 
-
+gpickle.dump(H)
 

@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from plotly.offline import init_notebook_mode, iplot
 import plotly.graph_objs as go
-import regressor as gaspy_regressor     # noqa: F401
+import seaborn as sns
 sys.path.insert(0, '../')
 from gaspy import utils, defaults   # noqa: E402
 
@@ -68,9 +68,9 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
         cat_pdocs   The parsed mongo documents of the filtered catalog
         cat_x       The regressor's predicitons for whatever descriptor we chose
         ads_pdocs   The parsed mongo documents of the filtered results database
-                    Only returns if `include_results == True`
+                    Returns `None` if `include_results == False`
         ads_x       The simulated values for whatever descriptor we chose.
-                    Only returns if `include_results == True`
+                    Returns `None` if `include_results == False`
     '''
     # Some of our defaults need to be lists, which are mutable. So we define them
     # down here.
@@ -176,9 +176,9 @@ def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xl
 
     # Return some things in case the user wants to save them for later
     if include_results:
-        return cat_docs, cat_x, ads_docs, ads_x
-    else:
-        return cat_pdocs, cat_x
+        ads_docs = None
+        ads_x = None
+    return cat_docs, cat_x, ads_docs, ads_x
 
 
 def _minimize_over(fingerprints, docs, values):

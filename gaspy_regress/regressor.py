@@ -24,7 +24,7 @@ from plotly.offline import init_notebook_mode, plot, iplot
 import plotly.graph_objs as go
 import matplotlib
 from matplotlib import pyplot as plt
-from preprocessor import GASpyPreprocessor
+from .preprocessor import GASpyPreprocessor
 sys.path.append('..')
 from gaspy import utils
 
