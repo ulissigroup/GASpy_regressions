@@ -11,257 +11,221 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa: F401
 import sys
+import warnings
 import numpy as np
-import pandas as pd
 from plotly.offline import init_notebook_mode, iplot
 import plotly.graph_objs as go
+import matplotlib
+from matplotlib import pyplot as plt
 import seaborn as sns
+from .transform import _pull_literature_volcano
 sys.path.insert(0, '../')
-from gaspy import utils, defaults   # noqa: E402
 
 
-def volcano(regressor, adsorbate, sheetname, excel_file_path='volcanos_parsed.xlsx',
-            regressor_block='no_block', fp_blocks='default', scale='linear', title=None,
-            xlabel='adsorption energy (eV)', ylabel='activity', jupyter=True,
-            include_results=False, descriptor='energy', vasp_settings=None,
-            energy_min=-4, energy_max=4, f_max=0.5,
-            ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5):
+def volcano(data, excel_file_path, sheetname, scale='linear', title=None,
+            x_label='adsorption energy (eV)', y_label='activity', jupyter=True):
     '''
-    Create a volcano plot for the CO2 reduction reaction. This function assumes that
-    the Excel worksheet for the CO2 volcano is named 'CO2RR'.
-
-    Inputs:
-        regressor           An instance of a fitted GASpyRegressor class
-        adsorbate           A string indicating the adsorbate that you want to be studying.
-                            If you want more than one adsorbate, then you should probably
-                            make another function.
-        sheetname           A string indicating the name of the Excel
-                            worksheet that contains the volcano information
-        excel_file_path     A string indicating the location of the properly-formatted
-                            excel file that contains the incumbent volcano
-        regressor_block     If your regression model is blocked, you'll need to specify
-                            which block you want to use to make the predictions. This
-                            will probably be a tuple of strings, like ('CO',).
-        fp_blocks           A list of fingerprints over which to find minima
-                            (reference the `_minimize_over` function). If you don't want to
-                            block at all, then you may set it to `None`
-        scale               A string indicating the scale of the volcano you want to read/make.
-                            'linear' or 'logarithmic' are good guesses.
-        title               A string for the plot title
-        xlabel              A string for the x-axis label
-        ylabel              A string for the y-axis label
-        jupyter             A boolean indicating whether or not you are making this plot
-                            in a Jupyter notebook.
-        include_results     A boolean indicating whether or not you only want to include
-                            simulation results along with the regressor's predictions.
-                            Note that if you include simulation results, then cataloged
-                            points that correspond to the results database will be
-                            filtered out with the `gaspy.unsimulated_catalog` function.
-        descriptor          A string indicating the descriptor you are using to
-                            create the volcano. This only matters if `include_results`
-                            is `True`, because this argument is used to pull out
-                            the appropriate information from the results database.
-        All of the other inputs are filter settings for the data that we want
-        to pull from the database of results. These only matter when
-        `include_results == True`.
-    Outputs:
-        cat_pdocs   The parsed mongo documents of the filtered catalog
-        cat_x       The regressor's predicitons for whatever descriptor we chose
-        ads_pdocs   The parsed mongo documents of the filtered results database
-                    Returns `None` if `include_results == False`
-        ads_x       The simulated values for whatever descriptor we chose.
-                    Returns `None` if `include_results == False`
     '''
-    # Some of our defaults need to be lists, which are mutable. So we define them
-    # down here.
-    if fp_blocks == 'default':
-        fp_blocks = ['mpid', 'miller', 'top']
+    # Unpack the data structure
+    sim_data, unsim_data = data
+    ads_docs, ads_data, _ = zip(*sim_data)
+    cat_docs, cat_data = zip(*unsim_data)
+    ads_x_data, ads_y_data = zip(*ads_data)
+    cat_x_data, cat_y_data = zip(*cat_data)
+    ads_x, ads_x_u = zip(*ads_x_data)
+    cat_x, cat_x_u = zip(*cat_x_data)
+    ads_y, ads_y_u = zip(*ads_y_data)
+    cat_y, cat_y_u = zip(*cat_y_data)
 
-    # Load the literature volcano data
-    volcano, x_expt, y_expt, label_expt = \
-        _pull_literature_volcano(excel_file_path, 'CO2RR', scale=scale)
+    # Load the experimental data points from the volcano
+    _, x_expt, y_expt, labels_expt = _pull_literature_volcano(excel_file_path, sheetname, scale=scale)
 
-    # If we're including the results in the volcano, then pull all the documents.
-    if include_results:
-        # Define the fingerprints to pull from the database, and add the descriptor
-        # to make sure that we get it out
-
-        # Note that we filter the "bad" documents from the results database
-        # by specifying a lot of filters.
-        with utils.get_adsorption_db() as ads_client:
-            fingerprints = defaults.fingerprints(simulated=True)
-            ads_docs, ads_pdocs = utils.get_docs(ads_client, 'adsorption',
-                                                 adsorbates=[adsorbate],
-                                                 fingerprints=fingerprints,
-                                                 vasp_settings=vasp_settings,
-                                                 energy_min=energy_min,
-                                                 energy_max=energy_max,
-                                                 f_max=f_max,
-                                                 ads_move_max=ads_move_max,
-                                                 bare_slab_move_max=bare_slab_move_max,
-                                                 slab_move_max=slab_move_max)
-            ads_x = np.array(ads_pdocs[descriptor])
-        cat_docs, cat_pdocs = utils.unsimulated_catalog(adsorbates=[adsorbate],
-                                                        vasp_settings=vasp_settings,
-                                                        fingerprints=defaults.fingerprints())
-    # If we're including only the catalog, then pull only the catalog information
-    else:
-        with utils.get_catalog_db() as cat_client:
-            cat_docs, cat_pdocs = utils.get_docs(cat_client, 'catalog',
-                                                 fingerprints=defaults.fingerprints())
-
-    # Catalog documents don't have any information about adsorbates. But if our model
-    # requires information about adsorbates, then we probably need to put it in.
-    # Note that we have an EAFP wrapper to check whether our model is hierarchical or not.
-    try:
-        features = regressor.features + regressor.features_inner
-    except AttributeError:
-        features = regressor.features
-    if 'ads' in features:
-        cat_pdocs['adsorbates'] = [[adsorbate]] * len(cat_docs)
-    # Create the regressor's prediction
-    cat_x = regressor.predict(cat_pdocs, regressor_block)
-
-    # Filter the data over each fingerprint block, as per the `_minimize_over` function.
-    if fp_blocks:
-        if include_results:
-            # If we are including the results, then we need to pool the catalog and results
-            # together before finding the minima. This ensures that each block will only
-            # have one data point show up on the plot. But before we pool them together,
-            # we add a new "fingerprint" to their p_docs so that we can keep track of which
-            # data come from where after they've been pooled.
-            for i, doc in enumerate(cat_docs):
-                doc['catalog?'] = True
-                cat_docs[i] = doc
-            for i, doc in enumerate(ads_docs):
-                doc['catalog?'] = False
-                ads_docs[i] = doc
-            pooled_x = np.concatenate((cat_x, ads_x), axis=0)
-            pooled_docs = cat_docs + ads_docs
-            # After pooling, we call `_minimizer_over`
-            pooled_docs, pooled_x = _minimize_over(fp_blocks, pooled_docs, pooled_x)
-            # Now un-pool so that we can differentiate the data in the final plot
-            cat_x = []
-            ads_x = []
-            cat_docs = []
-            ads_docs = []
-            for i, x in enumerate(pooled_x):
-                if pooled_docs[i]['catalog?']:
-                    cat_x.append(x)
-                    cat_docs.append(pooled_docs[i])
-                else:
-                    ads_x.append(x)
-                    ads_docs.append(pooled_docs[i])
-        else:
-            cat_docs, cat_x = _minimize_over(fp_blocks, cat_docs, cat_x)
-
-    # Plot the experimental data points, the regressor's predictions, and then
-    # (if necessary) the results from the database
-    traces = [go.Scatter(x=x_expt, y=y_expt, name='Experimental points',
-                         mode='markers', text=label_expt)]
-    traces.append(_make_trace(cat_x, volcano, cat_docs, label='Regressor predictions'))
-    if include_results:
-        traces.append(_make_trace(ads_x, volcano, ads_docs, label='Simulations'))
+    # Create plotly traces for the experimental data points, the regressor's estimations,
+    # and then (if necessary) the results from the database
+    traces = [go.Scatter(x=x_expt, y=y_expt, name='Experimental Points',
+                         mode='markers', text=labels_expt),
+              _make_trace(cat_x, cat_y, cat_docs, name='Regressor Estimations'),
+              _make_trace(ads_x, ads_y, ads_docs, name='Simulation Predictions')]
 
     # Format and display
-    yaxis = dict(title=ylabel)
-    if scale == 'logarithmic':
-        yaxis['type'] = 'log'
-    layout = go.Layout(xaxis=dict(title=xlabel),
-                       yaxis=yaxis,
-                       title=title)
+    y_axis = dict(title=y_label)
+    if scale == 'log':
+        y_axis['type'] = 'log'
+    layout = go.Layout(xaxis=dict(title=x_label), yaxis=y_axis, title=dict(title=title))
     if jupyter:
         init_notebook_mode(connected=True)
     iplot(go.Figure(data=traces, layout=layout))
 
-    # Return some things in case the user wants to save them for later
-    if include_results:
-        ads_docs = None
-        ads_x = None
-    return cat_docs, cat_x, ads_docs, ads_x
 
-
-def _minimize_over(fingerprints, docs, values):
+def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title=None,
+                    x_label='DFT-prediction', y_label='ML-estimate', plot_range=None,
+                    color='k', font_size=15, font_scale=1, grid_size=20, marker_size=20,
+                    jupyter=True,
+                    save=False, save_name='transformed_parity.pdf', save_dpi=900, **kwargs):
     '''
-    In some cases, we do not want to plot all of our data. We would rather
-    plot only data that represent minima within certain blocks or fingerprints.
-    For example:  If we are looking at adsorption energies, sometimes we only
-    want to find the minimum adsorption energies for a given surface for each
-    bulk material we are looking at. This function performs this filtering for us.
+    This function will create a parity plot of a regression, but instead of plotting the typical
+    "estimate vs. truth", it will plot a transformed version of "estimate vs. truth". For example,
+    it can turn an adsorption energy parity plot into an activity parity plot.
 
-    We do this by first defining each `block`, where each block is a unique
-    combination of fingerprint values within `fingerprints`. For example:  if
-    we want to minimize over mpid and miller index, then we would set
-    `fingerprints=['mpid', 'miller']`. Then an example of a `block` would be
-    `('mpid', [2, 1, 1])`. And then within each block, we would find the data
-    point with the minimum `value`, and add only that data point to the output.
+    Note that we used the suffixes `pred` and `est`. `pred` corresponds to simulation predictions,
+    and `est` corresponds to surrogame model estimates.
 
     Inputs:
-        fingerprints    A list of strings for the fingerprints that you want
-                        to block within
-        docs            A list of dictionaries, AKA mongo documents.
-                        See `gaspy.utils.get_docs` for more details.
-        values          A np.array of floats over which to perform the minimization
-    Outputs:
-        min_pdocs       The filtered version of `docs`
-        min_values      The filtered version of `values`
+        plot_type   A string indicating the type of parity plot you want. This can be:
+                    hex         For a seaborn hex plot
+                    matplotlib  For a matplotlib scatter plot
+                    plotly      For a plotly scatter plot
+        transform   A boolean indicating whether you want to plot the transformed data or not.
+        scale       A string indicating the scale of the thing you want to plot. Can be
+                    'linear' or 'log'
+        title       Title of the plot
+        x_label     X-axis label of the plot
+        y_label     Y-axis label of the plot
+        plot_range  A list whose first element is the minimum axis value to plot and whose
+                    second element is the maximum axis value to plot
+        color       The color you want to plot with. Only works with
+                    plot_type == 'matplotlib' or 'hex'
+        font_size   The size of the fonts you want to create. Does nothing when
+                    plot_type == 'plotly'
+        font_scale  Scale the font. Works only when plot_type == 'hex'
+        marker_size The size of the markers. Works only when plot_type == 'matplotlib'
+        jupyter     A boolean indicating whether or not you're using jupyter. This is
+                    really only necessary when plot_type == 'plotly'
+        save        A boolean indicating whether or not you want to save the plot.
+        save_name   A string for the name of the file you want to save to. Only works when
+                    save == True
+        save_dpi    An integer indicating what DPI you want to use. Only works when
+                    save == True
     '''
-    # We're going to parse our data into a dictionary, `block_data`, whose keys
-    # will be tuples that represent the unique blocks of fingerprints,
-    # e.g., ('mpid-23', '[2, 1, 1]'), and whose values will be lists of datum
-    # that fall into that bucket. The "datum" will be 2-tuples whose first
-    # element is the index of the datum within `values`, and whose second element
-    # is the actual `value` from `values`.
-    block_data = {}
-    for i, value in enumerate(values):
-        # Note that we turn the fingerprints into strings to make sure iterables
-        # (like lists for miller indices) don't start doing funny things to our code.
-        block = tuple([str(docs[i][fingerprint]) for fingerprint in fingerprints])
-        # EAFP to either append a new entry to an existing block, or create a new block
-        try:
-            block_data[block].append((i, value))
-        except KeyError:
-            block_data[block] = [(i, value)]
+    # Unpack the data structure
+    sim_data, _ = data
+    docs, predictions, estimations = zip(*sim_data)
+    x_data_pred, y_data_pred = zip(*predictions)
+    x_data_est, y_data_est = zip(*estimations)
+    # If we want to plot the transformed data, then we pull out the y-values
+    if transform:
+        pred, pred_u = zip(*y_data_pred)
+        est, est_u = zip(*y_data_est)
+        pred = np.array(pred)
+        est = np.array(est)
+    # If we want to plot the untransformed data, then we pull out the x-values
+    else:
+        pred, pred_u = zip(*x_data_pred)
+        est, est_u = zip(*x_data_est)
+        pred = np.array(pred)
+        est = np.array(est)
+    # Calculate the range of the data and set `plot_range` if it's not specified
+    if not plot_range:
+        plot_min = np.min(np.minimum(pred, est))
+        plot_max = np.max(np.maximum(pred, est))
+        plot_range = [plot_min, plot_max]
+    else:
+        plot_min = plot_range[0]
+        plot_max = plot_range[1]
 
-    # Now that our data is divided into blocks, we can start figuring out
-    # which datum within each block's data set yields the minimum `value`.
-    # We will then add the index of that datum as a key to `indices`, which
-    # is a search dictionary of indices we'll use to rebuild/filter our data set.
-    indices = {}
-    for block, data in block_data.iteritems():
-        min_block_index = np.argmin([datum[1] for datum in data])
-        indices[data[min_block_index][0]] = None
+    # Make a hex plot with Seaborn
+    if plot_type == 'hex':
+        # Scaling/font sizes
+        sns.set_context('paper', rc={'font.size': font_size,
+                                     'axes.titlesize': font_size,
+                                     'axes.labelsize': font_size})
+        sns.set(font_scale=font_scale)
+        if scale == 'linear':
+            pass
+        elif scale == 'log':
+            # Seaborn is not yet good at making log-log jointplots with hexbin shading.
+            # So we make a linear jointplot with hexbin shading, but simply put the logarithm
+            # of the values in.
+            plot_range = tuple(np.log10(plot_range))
+            plot_min = np.log10(plot_min)
+            plot_max = np.log10(plot_max)
+            pred = np.log10(pred)
+            est = np.log10(est)
+        else:
+            raise ValueError('That scale type is not recognized')
+        # Note that we also trim out points outside of the plotting range,
+        # because the hex bins get all messed up if we simply "zoom in". We also convert to
+        # numpy arrays because Seaborn likes them.
+        pred_trimmed = []
+        est_trimmed = []
+        for _pred, _est in zip(pred, est):
+            if plot_min < _pred < plot_max and plot_min < _est < plot_max:
+                pred_trimmed.append(_pred)
+                est_trimmed.append(_est)
+        pred_trimmed = np.array(pred_trimmed)
+        est_trimmed = np.array(est_trimmed)
+        # Now plot
+        g = sns.jointplot(pred_trimmed, est_trimmed, kind='hex', space=0, stat_func=None,
+                          gridsize=grid_size, color=color)
+        g.set_axis_labels(x_label, y_label)
+        plt.tight_layout()
+        # Save & display
+        if save:
+            plt.savefig(save_name, bbox_inches='tight', dpi=save_dpi)
+        plt.show()
 
-    # Now filter the inputs to create the outputs
-    min_values = []
-    min_docs = []
-    for i, value in enumerate(values):
-        if i in indices:
-            min_values.append(value)
-            min_docs.append(docs[i])
-    min_values = np.array(min_values)
+    # Make a scatter plot with Matplotlib
+    if plot_type == 'matplotlib':
+        plt.scatter(pred, est, s=marker_size, c=color)
+        plt.xlim(plot_min, plot_max)
+        plt.ylim(plot_min, plot_max)
+        if scale == 'log':
+            ax = plt.gca()
+            ax.set_xscale(scale)
+            ax.set_yscale(scale)
+        elif scale == 'linear':
+            pass
+        else:
+            raise ValueError('That scale type is not recognized')
+        font = {'size': font_size}
+        matplotlib.rc('font', **font)
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        # Save & display
+        if save:
+            plt.savefig(save_name, bbox_inches='tight', dpi=save_dpi)
+        plt.show()
 
-    return min_docs, min_values
+    # Make a scatter plot with Plotly
+    if plot_type == 'plotly':
+        traces = [_make_trace(pred, est, docs, name='Simulations'),
+                  go.Scatter(x=plot_range, y=plot_range, name='Parity',
+                             line=dict(color=('black'), dash='dash'))]
+        xaxis = dict(title=x_label, range=plot_range)
+        yaxis = dict(title=y_label, range=plot_range)
+        if scale == 'log':
+            plot_range = np.log10(plot_range)
+            xaxis['range'] = plot_range
+            yaxis['range'] = plot_range
+            xaxis['type'] = 'log'
+            yaxis['type'] = 'log'
+        elif scale == 'linear':
+            pass
+        else:
+            raise ValueError('That scale type is not recognized')
+        layout = go.Layout(xaxis=xaxis, yaxis=yaxis, title=title,
+                           width=800, height=800, legend=dict(x=0, y=1))
+        if jupyter:
+            init_notebook_mode(connected=True)
+        # Save & display
+        if save:
+            warnings.warn('Not saving a figure when you choose to use plotly. Export it yourself.')
+        iplot(go.Figure(data=traces, layout=layout))
 
 
-def _make_trace(x, predictor, docs, label):
+def _make_trace(x, y, docs, name):
     '''
     This function creates a plotly "trace"
 
     Inputs:
-        x           A numpy.array of floats that you want to plot on the x-axis
-        predictor   A function that can accept `x` and predict the appropriate values
-                    for the y-axis. For example:  This could be a function
-                    that can predict activity from adsorption energies.
-        docs        The corresponding "mongo documents" that go with `x`.
-                    Refer to `gaspy.utils.get_docs` for more details.
-        label       A string indicating how you want this trace to be... labeled.
+        x       A sequence for the y-values that you want to plot
+        y       A sequence for the y-values that you want to plot
+        docs    The corresponding "mongo documents" that go with `x`.
+                Refer to `gaspy.utils.get_docs` for more details.
+        name    A string indicating how you want this trace to be... named
     Output
         trace   A plotly graph object that you can add to a list of traces
     '''
-    # Use the predictor to... predict
-    y = predictor(x)
-
     # Concatenate the parsed mongo documents into strings to include as hovertext
     hover_text = []
     for doc in docs:
@@ -271,85 +235,7 @@ def _make_trace(x, predictor, docs, label):
         hover_text.append(text)
 
     # Add the catalog data to the plot
-    trace = go.Scatter(x=x, y=y, name=label,
+    trace = go.Scatter(x=x, y=y, name=name,
                        mode='markers', text=hover_text)
 
     return trace
-
-
-def _pull_literature_volcano(excel_file_path, sheetname, scale):
-    '''
-    This function pulls data from an Excel file to create a "volcano function",
-    which is a function that turns an input x-value into an output y-value
-    (e.g., adsorption energy to activity). It also outputs the experimental
-    data points that should be in the same Excel file.
-
-    Note that we've hard-coded the location of particular information within
-    the Excel file, which means that you need to format the Excel file
-    appropriately. Follow the template in the repository.
-
-    Inputs:
-        excel_file_path     A string indicating the location of the properly-formatted
-                            excel file that contains the incumbent volcano
-        sheetname           A string indicating the sheet within the Excel file that
-                            the information in stored in
-        scale               A string indicating the scale across which the volcano curve
-                            varies (e.g., linear, logarithmic, etc.).
-    Return:
-        volcano A function whose input is a float (or a numpy.array) indicating
-                the x-axis location on the volcano and whose output
-                is a float (or a numpy.array) indicating the y-axis
-                location.
-        x       The x-values of the experimental data points
-        y       The y-values of the experimental data points
-        labels  The string-formatted labels of the experimental data points
-    '''
-    # Pull the dataframe out of Excel
-    df = pd.read_excel(excel_file_path, sheetname=sheetname)
-    # Pull out the coordinates (x, y) and the labels (labels) of the
-    # experimental data points
-    labels = df.iloc[:, 0].get_values()
-    y = df.iloc[:, 1].get_values()
-    x = df.iloc[:, 2].get_values()
-    # Do some fancy footwork to find `zenith`, which is the x-value at
-    # the zenith of the volcano curve.
-    zi = (df.iloc[:, 3] == 'Zenith')
-    zenith = df.iloc[:, 2][zi].get_values()[0]
-    # Find the slope and intercepts of the lines for both the LHS and
-    # RHS of the volcano. Note that this is hard-coded, so make sure
-    # the Excel file was completed as per the template.
-    lhs_slope = df.iloc[0, 6]
-    lhs_intercept = df.iloc[0, 7]
-    rhs_slope = df.iloc[0, 10]
-    rhs_intercept = df.iloc[0, 11]
-
-    # All of our volcanos are 2-part functions. This `unpack` function returns
-    # the parameters that are appropriate for whichever side of the volcano
-    # we're on.
-    def unpack(x):
-        '''
-        Unpack either the left-hand-side or right-hand-side parameters from the `parameters`
-        dictionary, depending on whether the x-value is to the left or right of the zenith.
-        '''
-        m = np.where(x < zenith, lhs_slope, rhs_slope)
-        b = np.where(x < zenith, lhs_intercept, rhs_intercept)
-        return m, b
-
-    # Create the volcano function assuming it's linear
-    if scale == 'linear':
-        def volcano(x):
-            ''' Linear volcano '''
-            m, b = unpack(x)
-            return m*x + b
-
-    # Create the volcano function assuming it's logarithmic
-    elif scale == 'logarithmic':
-        def volcano(x):
-            ''' Exponential volcano '''
-            m, b = unpack(x)
-            return np.exp(m*x + b)
-
-    else:
-        raise Exception('You have not yet defined the function for a %s scale' % scale)
-
-    return volcano, x, y, labels

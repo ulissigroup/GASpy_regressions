@@ -557,7 +557,7 @@ class GASpyRegressor(object):
         def _predict(inner_features, outer_features, block='no_block'):
             inner_predictions = self._predict_inner(inner_features, block=block)
             outer_predictions = self._predict_outer(outer_features, block=block)
-            predictions = inner_predictions - outer_predictions
+            predictions = inner_predictions + outer_predictions
             return predictions
         self._predict = _predict
 

@@ -9,3 +9,4 @@ from . import gpickle
 from . import plot
 from . import preprocessor
 from . import regressor
+from . import transform

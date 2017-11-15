@@ -9,7 +9,7 @@ __email__ = 'ktran@andrew.cmu.edu'
 import pdb  # noqa:  F401
 import copy
 from collections import OrderedDict
-import multiprocessing
+#import multiprocessing
 from functools import partial
 import numpy as np
 from sklearn import preprocessing
