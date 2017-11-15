@@ -12,7 +12,6 @@ __email__ = 'ktran@andrew.cmu.edu'
 import pdb  # noqa:  F401
 import itertools
 import copy
-import sys
 import math
 import warnings
 import numpy as np
@@ -25,7 +24,6 @@ import plotly.graph_objs as go
 import matplotlib
 from matplotlib import pyplot as plt
 from .preprocessor import GASpyPreprocessor
-sys.path.append('..')
 from gaspy import utils
 
 

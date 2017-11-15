@@ -7,10 +7,8 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa: F401
-import sys
 import numpy as np
 import pandas as pd
-sys.path.insert(0, '../')
 from gaspy import utils, defaults   # noqa: E402
 
 

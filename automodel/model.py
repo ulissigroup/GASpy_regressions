@@ -5,10 +5,8 @@
 
 # Importing
 import pdb
-import sys
 from gaspy_regress.regressor import GASpyRegressor
 from gaspy_regress import gpickle, plot
-sys.path.insert(0, '../')
 from gaspy.utils import vasp_settings_to_str
 
 VASP_SETTINGS = vasp_settings_to_str({'gga': 'RP',

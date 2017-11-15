@@ -22,3 +22,10 @@ that creates and saves only the models that we plan to use in the feedback loop.
 (`update_model.sh`), which can be executed in Cron jobs. Thus, we can automate the modeling portion of the feedback loop.
 
 `Volcano_plots.ipynb` is the file that analyzes the GASpy and GASpy_regression results for scientific analysis.
+
+## Installation
+Remember to add the repo to your Python path. The module importing assumes that you have GASpy in your Python path.
+You can do so by putting the following in your `.bashrc`:
+```
+export PYTHONPATH="/path/to/GASpy/GASpy_regressions:${PYTHONPATH}"
+```

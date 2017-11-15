@@ -10,7 +10,6 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa: F401
-import sys
 import warnings
 import numpy as np
 from plotly.offline import init_notebook_mode, iplot
@@ -19,7 +18,6 @@ import matplotlib
 from matplotlib import pyplot as plt
 import seaborn as sns
 from .transform import _pull_literature_volcano
-sys.path.insert(0, '../')
 
 
 def volcano(data, excel_file_path, sheetname, scale='linear', title=None,
