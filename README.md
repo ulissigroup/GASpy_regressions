@@ -16,7 +16,7 @@ to perform the regression. Afterwards, you may pass parsed mongo documents to th
 documents from the `gaspy.utils.get_docs` function. More advanced plotting and predicting
 features are available and showcased in the `sandbox.ipynb` file.
 
-These models may be combined with GASpy_predict (https://github.com/ktran9891/GASpy_predict)
+These models may be combined with [GASpy_predict](https://github.com/ktran9891/GASpy_predict)
 and GASpy to create automated, active learing loops of DFT-simulation, surrogate model regression,
 prediction, and more DFT-simulation. To facilitate this active learning, we created the
 `model.ipynb` file in the `scripts` folder. This notebook is a trimmed version of `sandbox.ipynb`
