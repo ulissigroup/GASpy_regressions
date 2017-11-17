@@ -17,7 +17,7 @@ import plotly.graph_objs as go
 import matplotlib
 from matplotlib import pyplot as plt
 import seaborn as sns
-from .transform import _pull_literature_volcano
+from .predict import _pull_literature_volcano
 
 
 def volcano(data, excel_file_path, sheetname, scale='linear', title=None,

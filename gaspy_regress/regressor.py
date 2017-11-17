@@ -24,7 +24,7 @@ import plotly.graph_objs as go
 import matplotlib
 from matplotlib import pyplot as plt
 from .preprocessor import GASpyPreprocessor
-from gaspy import utils
+from gaspy import utils, gasdb
 
 
 class GASpyRegressor(object):
@@ -194,8 +194,8 @@ class GASpyRegressor(object):
         fingerprints['miller'] = '$processed_data.calculation_info.miller',
 
         # Pull the data into parsed mongo documents (i.e., a dictionary of lists), `p_docs`
-        with utils.get_adsorption_db() as client:
-            _, p_docs = utils.get_docs(client, collection, fingerprints,
+        with gasdb.get_adsorption_client() as client:
+            _, p_docs = gasdb.get_docs(client, collection, fingerprints,
                                        adsorbates=None,
                                        calc_settings=None,
                                        vasp_settings=vasp_settings,

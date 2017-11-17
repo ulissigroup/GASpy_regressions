@@ -5,7 +5,9 @@ This module is really just a wrapper for Python's `dill` module, but with some n
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+
 import dill as pickle
+from gaspy import utils
 pickle.settings['recurse'] = True     # required to pickle lambdify functions (for alamopy)
 
 
@@ -18,15 +20,15 @@ def dump_model(regressor, fname=None):
         # If it's a hierarchical model, then we need to save both feature sets
         try:
             fname = __concatenate_model_name(regressor.model_name,
-                                  regressor.features_inner + regressor.features,
-                                  regressor.responses,
-                                  regressor.blocks)
+                                             regressor.features_inner + regressor.features,
+                                             regressor.responses,
+                                             regressor.blocks)
         # If it's not hierarchical, then proceed as normal
         except AttributeError:
             fname = __concatenate_model_name(regressor.model_name,
-                                  regressor.features,
-                                  regressor.responses,
-                                  regressor.blocks)
+                                             regressor.features,
+                                             regressor.responses,
+                                             regressor.blocks)
 
     with open(fname, 'wb') as f:
         pickle.dump(regressor, f)
@@ -101,6 +103,10 @@ def __concatenate_model_name(model_name, features, responses, blocks):
     for a regressed model. Refer to the `GASpyRegressor` class in `regressor.py` for
     desciptions of this function's arguments (which are the attributes of that class).
     '''
+    # Find the location of the repo to define the location of the pickle folder
+    rc = utils.read_rc()
+    pkl_path = rc['gaspy_path'] + '/GASpy_regressions/pkls/'
+
     # Turn the attributes into strings
     feature_names = 'FEATURES_' + '_'.join(features)
     response_names = 'RESPONSES_' + '_'.join(responses)
@@ -109,7 +115,7 @@ def __concatenate_model_name(model_name, features, responses, blocks):
     except TypeError:
         block_names = 'BLOCKS_'
     # Make the file name
-    fname = 'pkls/' + '_'.join([model_name, feature_names, response_names, block_names]) + '.pkl'
+    fname = pkl_path + '_'.join([model_name, feature_names, response_names, block_names]) + '.pkl'
 
     return fname
 
@@ -121,8 +127,9 @@ def __concatenate_prediction_name(model_name, features, responses, blocks, syste
     desciptions of this function's arguments (which are the attributes of that class).
     '''
     # We're really just piggy-backing off of a different __concatenate function, but adding
-    # a little more
-    fname = __concatenate_model_name(model_name, features, responses, blocks)
-    fname = 'pkls/' + system + '_predictions_' + fname[5:]
+    # a little more information to the front of the file name
+    file_path = __concatenate_model_name(model_name, features, responses, blocks)
+    pkl_path, file_name = file_path.split('pkls/')
+    fname = pkl_path + 'pkls/' + system + '_predictions_' + file_name
 
     return fname
