@@ -7,6 +7,7 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa: F401
+import pickle
 import numpy as np
 import pandas as pd
 from gaspy import gasdb, defaults   # noqa: E402
@@ -140,6 +141,58 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
                      zip(zip(cat_x, cat_x_u), zip(cat_y, cat_y_u)))
 
     return sim_data, unsim_data
+
+
+def best_surfaces(data_ball_path, performance_threshold):
+    '''
+    Turns a ball of data created by another `predict.*` function, such as `volcanos`,
+    and parses it to create a list of the highest performing surfaces.
+
+    Input:
+        data_ball_path          A  string indicating the location of the the data ball
+        performance_threshold   A float (between 0 and 1, preferably) that indicates
+                                the minimum level of performance relative to the best
+                                performing surface.
+    Output:
+        best_surfaces   TDB
+    '''
+    # Unpack the data structure
+    with open(data_ball_path, 'r') as f:
+        data_ball = pickle.load(f)
+    sim_data, unsim_data = data_ball
+    sim_docs, predictions, _ = zip(*sim_data)
+    cat_docs, estimations = zip(*unsim_data)
+    _, y_data_pred = zip(*predictions)
+    y_pred, y_u_pred = zip(*y_data_pred)
+    _, y_data_est = zip(*estimations)
+    y_est, y_u_est = zip(*y_data_est)
+
+    # Package the estimations and predictions together, because we don't
+    # really care which they come from. Then zip it up so we can sort everything
+    # at once.
+    docs = list(sim_docs)
+    docs.extend(list(cat_docs))
+    y = list(y_pred)
+    y.extend(list(y_est))
+    y_u = list(y_u_pred)
+    y_u.extend(list(y_u_est))
+    data = zip(docs, y, y_u)
+
+    # Sort the data so that the items with the highest `y` values are
+    # at the beginning of the list
+    data = sorted(data, key=lambda datum: datum[1], reverse=True)
+    # Take out everything that hasn't performed well enough
+    y_max = data[0][1]
+    data = [(doc, _y, _y_u) for doc, _y, _y_u in data if _y > performance_threshold*y_max]
+    # Find the best performing surfaces
+    best_surfaces = []
+    for doc, _, _ in data:
+        mpid = doc['mpid']
+        miller = tuple(doc['miller'])
+        surface = (mpid, miller)
+        best_surfaces.append(surface)
+
+    return best_surfaces
 
 
 def _minimize_over(cat_docs, cat_values, sim_docs, sim_values, fp_blocks):

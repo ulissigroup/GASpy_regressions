@@ -7,7 +7,9 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 
 import dill as pickle
+from oauth2client.service_account import ServiceAccountCredentials
 from gaspy import utils
+import gspread
 pickle.settings['recurse'] = True     # required to pickle lambdify functions (for alamopy)
 
 
@@ -95,6 +97,25 @@ def load_predictions(model_name, features, responses, blocks, system):
         regressor = pickle.load(f)
 
     return regressor
+
+
+def push_to_gspread(sheetname):
+    '''
+    This function will push data to a Google spreadsheet
+
+    Inputs:
+        sheetname   A string indicating the name of the sheet you want to be dumping to
+    '''
+    # Find and read the credentials so that we can access the spreadsheet
+    gaspy_path = utils.read_rc()['gaspy_path']
+    credentials_path = gaspy_path + '/GASpy_regressions/.gdrive_credentials.json'
+    scope = ['https://spreadsheets.google.com/feeds']
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(credentials_path, scope)
+    gc = gspread.authorize(credentials)
+
+    # Open a worksheet from spreadsheet with one shot
+    wks = gc.open(sheetname)
+
 
 
 def __concatenate_model_name(model_name, features, responses, blocks):
