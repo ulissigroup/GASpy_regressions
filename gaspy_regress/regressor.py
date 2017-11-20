@@ -16,15 +16,15 @@ import math
 import warnings
 import numpy as np
 import dill as pickle
-pickle.settings['recurse'] = True     # required to pickle lambdify functions (for alamopy)
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
-from plotly.offline import init_notebook_mode, plot, iplot
+from plotly.offline import init_notebook_mode, iplot
 import plotly.graph_objs as go
 import matplotlib
 from matplotlib import pyplot as plt
 from .preprocessor import GASpyPreprocessor
 from gaspy import utils, gasdb
+pickle.settings['recurse'] = True     # required to pickle lambdify functions (for alamopy)
 
 
 class GASpyRegressor(object):
@@ -32,7 +32,7 @@ class GASpyRegressor(object):
     All of the `fit_*` methods have similar output structures. Here it is:
 
     Outputs:
-        rmses       A nested dictionary whose first set of keys are the block ('no_block' if there
+        rmses       A nested dictionary whose first set of keys are the block ((None,) if there
                     is no blocking). The second set of keys are the dataset (i.e., 'train',
                     'test', or 'train+test'. The values of the sub-dictionary are the
                     root-mean-squared-error of the model for the corresponding block
@@ -126,7 +126,7 @@ class GASpyRegressor(object):
                             [('H', 'mp-23'), ('O', 'mp-23'), ('H', 'mp-126'), ('O', 'mp-126')].
                             Note that the order of the values in the tuple corresponds to the
                             order in which the fingerprints are listed within `blocks`.
-                            If there is no block, then `block_list` = 'no_block'.
+                            If there is no block, then `block_list` = (None,).
             indices_train   The indices that can be used to find the training set
                             from the entire set
             indices_test    The indices that can be used to find the test set
@@ -231,13 +231,13 @@ class GASpyRegressor(object):
         p_docs_test = {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()}
 
         # Assign the information to the class attributes
-        self.x = {'no_block': {'train': x_train,
+        self.x = {(None,): {'train': x_train,
                                'test': x_test,
                                'train+test': x}}
-        self.y = {'no_block': {'train': y_train,
+        self.y = {(None,): {'train': y_train,
                                'test': y_test,
                                'train+test': y}}
-        self.p_docs = {'no_block': {'train': p_docs_train,
+        self.p_docs = {(None,): {'train': p_docs_train,
                                     'test': p_docs_test,
                                     'train+test': p_docs}}
         self.indices_train = indices_train
@@ -251,14 +251,14 @@ class GASpyRegressor(object):
             # while the former is simply the first adsorbate. This really only works
             # because we're only looking at one adsorbate at a time right now.
             if 'adsorbate' in blocks:
-                for dataset in self.p_docs['no_block']:
-                    self.p_docs['no_block'][dataset]['adsorbate'] = \
-                            [adsorbates[0] for adsorbates in self.p_docs['no_block'][dataset]['adsorbates']]  # noqa:  E501
+                for dataset in self.p_docs[(None,)]:
+                    self.p_docs[(None,)][dataset]['adsorbate'] = \
+                            [adsorbates[0] for adsorbates in self.p_docs[(None,)][dataset]['adsorbates']]  # noqa:  E501
 
             # Warn the user if they're trying to block by something that they might not
             # be pulling
             for block in blocks:
-                if block not in self.p_docs['no_block'][dataset]:
+                if block not in self.p_docs[(None,)][dataset]:
                     warnings.warn('You are trying to block by %s, but we did not find that fingerprint'  # noqa:  E501
                                   % block)
 
@@ -269,19 +269,19 @@ class GASpyRegressor(object):
             # [['O', 'CO'], ['Top', 'Bottom']]. We use block_values to create `block_list`.
             block_values = []
             for block in blocks:
-                block_values.append(np.unique(self.p_docs['no_block']['train+test'][block]).tolist())   # noqa:  E501
+                block_values.append(np.unique(self.p_docs[(None,)]['train+test'][block]).tolist())   # noqa:  E501
             self.block_list = [block for block in itertools.product(*block_values)]
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
             for block in self.block_list:
-                self.x[block] = self._filter(self.x['no_block'], blocks, block)
-                self.y[block] = self._filter(self.y['no_block'], blocks, block)
-                self.p_docs[block] = self._filter(self.p_docs['no_block'], blocks, block)
+                self.x[block] = self._filter(self.x[(None,)], blocks, block)
+                self.y[block] = self._filter(self.y[(None,)], blocks, block)
+                self.p_docs[block] = self._filter(self.p_docs[(None,)], blocks, block)
 
-        # If there is no blocking, then set `block_list` to ['no_block'], which will cause this
+        # If there is no blocking, then set `block_list` to [(None,)], which will cause this
         # class' methods to act on the entire dataset pulled by `PullFeatures`.
         else:
-            self.block_list = ['no_block']
+            self.block_list = [(None,)]
 
 
     def _filter(self, data, blocks, block):
@@ -314,7 +314,7 @@ class GASpyRegressor(object):
         if isinstance(np.array([]), dtype):
             for dataset, _data in data.iteritems():
                 fdata = [datum for i, datum in enumerate(_data)
-                         if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
+                         if all([fp_value == self.p_docs[(None,)][dataset][blocks[j]][i]
                                  for j, fp_value in enumerate(block)])]
                 # Convert to np.array so that it can be accepted by most regressors
                 filtered_data[dataset] = np.array(fdata)
@@ -326,7 +326,7 @@ class GASpyRegressor(object):
                 filtered_data[dataset] = dict.fromkeys(_data)
                 for p_doc_key, __data in _data.iteritems():
                     fdata = [datum for i, datum in enumerate(__data)
-                             if all([fp_value == self.p_docs['no_block'][dataset][blocks[j]][i]
+                             if all([fp_value == self.p_docs[(None,)][dataset][blocks[j]][i]
                                      for j, fp_value in enumerate(block)])]
                     filtered_data[dataset][p_doc_key] = fdata
 
@@ -382,7 +382,7 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(features, block='no_block'):
+        def _predict(features, block=(None,)):
             model = models[block]
             predictions = model.predict(features)
             return predictions
@@ -447,7 +447,7 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(features, block='no_block'):
+        def _predict(features, block=(None,)):
             model = models[block]
             predictions = model.predict(features)
             return predictions
@@ -532,7 +532,7 @@ class GASpyRegressor(object):
 
         # Create the outer preprocessor
         try:
-            pp = GASpyPreprocessor(p_docs['no_block']['train+test'], outer_features)
+            pp = GASpyPreprocessor(p_docs[(None,)]['train+test'], outer_features)
         except KeyError:
             raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')  # noqa:  E501
         # Preprocess p_docs again, but this time for the outer regressor
@@ -552,7 +552,7 @@ class GASpyRegressor(object):
         self._predict_outer = copy.deepcopy(self._predict)
 
         # Create and save the hierarchical model
-        def _predict(inner_features, outer_features, block='no_block'):
+        def _predict(inner_features, outer_features, block=(None,)):
             inner_predictions = self._predict_inner(inner_features, block=block)
             outer_predictions = self._predict_outer(outer_features, block=block)
             predictions = inner_predictions + outer_predictions
@@ -560,7 +560,7 @@ class GASpyRegressor(object):
         self._predict = _predict
 
 
-    def predict(self, p_docs, block='no_block'):
+    def predict(self, p_docs, block=(None,)):
         '''
         This method is a wrapper for whatever `_predict` function that we created with a `fit_*`
         method. The `_predict` function accepts preprocessed inputs. This method does
@@ -643,7 +643,7 @@ class GASpyRegressor(object):
                 datasets = ['train+test']
             for dataset in datasets:
                 # Unpack data from the class attributes
-                x = self.x[block][dataset]
+                # x = self.x[block][dataset]
                 y = self.y[block][dataset]
                 p_docs = self.p_docs[block][dataset]
                 errors = self.errors[block][dataset]

@@ -27,7 +27,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         regressor_block     If your regression model is blocked, you'll need to specify
                             which block you want to use to make the predictions. This
                             will probably be a tuple of strings, like ('CO',). If there
-                            was no block, then use 'no_block'
+                            was no block, then use (None,)
         These inputs define the volcano you want to use to transform the data:
             sheetname       A string indicating the name of the Excel worksheet that
                             contains the volcano information. AKA `system` in some other
