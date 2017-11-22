@@ -6,6 +6,7 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 
+import pdb
 import dill as pickle
 from oauth2client.service_account import ServiceAccountCredentials
 from gaspy import utils
@@ -99,12 +100,20 @@ def load_predictions(model_name, features, responses, blocks, system):
     return regressor
 
 
-def push_to_gspread(sheetname):
+def push_to_gspread(data, data_labels, sheet, worksheet):
     '''
-    This function will push data to a Google spreadsheet
+    This function will rewrite a worksheet in a Google sheet using whatever data and labels
+    you pass to it. Note that this function writes the data into rows instead of columns
+    to improve writing speed. If you want column-organized data, then you can make a new
+    worksheet and call the `transpose` function on the row-organized data.
 
     Inputs:
-        sheetname   A string indicating the name of the sheet you want to be dumping to
+        data        A list of tuples containing the data you want to dump
+        data_labels A tuple of strings containing the labels of the data. The length
+                    of this tuple should be the same length as the tuples in `data`
+        sheet       A string indicating the name of the Google sheet you want to be dumping to
+        worksheet   A string indicating the name of the worksheet within the Google sheet you
+                    want to dump to
     '''
     # Find and read the credentials so that we can access the spreadsheet
     gaspy_path = utils.read_rc()['gaspy_path']
@@ -113,9 +122,19 @@ def push_to_gspread(sheetname):
     credentials = ServiceAccountCredentials.from_json_keyfile_name(credentials_path, scope)
     gc = gspread.authorize(credentials)
 
-    # Open a worksheet from spreadsheet with one shot
-    wks = gc.open(sheetname)
+    # Open a worksheet from a spreadsheet
+    wks = gc.open(sheet)
+    wk = wks.worksheet(worksheet)
 
+    # Reorganize the data, label it, and then write it
+    for i, label in enumerate(data_labels):
+        data_vector = [datum[i] for datum in data]
+        data_vector.insert(0, label)
+        wk.insert_row(data_vector, index=i+1)
+
+    # Clear the old data
+    for _ in range(wk.row_count - len(data_labels)):
+        wk.delete_row(len(data_labels)+1)
 
 
 def __concatenate_model_name(model_name, features, responses, blocks):

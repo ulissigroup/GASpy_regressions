@@ -6,7 +6,7 @@
 # Importing
 import pdb
 from gaspy_regress.regressor import GASpyRegressor
-from gaspy_regress import gpickle, plot, predict
+from gaspy_regress import io, plot, predict
 from gaspy.utils import vasp_settings_to_str
 
 VASP_SETTINGS = vasp_settings_to_str({'gga': 'RP',
@@ -54,5 +54,5 @@ H.fit_hierarchical(gp, 'fit_sk', outer_features, model_name=model_name)
 
 # In[ ]:
 
-gpickle.dump_model(H)
+io.dump_model(H)
 

@@ -7,6 +7,7 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa: F401
+import re
 import pickle
 import numpy as np
 import pandas as pd
@@ -143,56 +144,87 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     return sim_data, unsim_data
 
 
-def best_surfaces(data_ball_path, performance_threshold):
+def best_surfaces(data_ball, performance_threshold, max_surfaces=1000):
     '''
     Turns a ball of data created by another `predict.*` function, such as `volcanos`,
     and parses it to create a list of the highest performing surfaces.
 
     Input:
-        data_ball_path          A  string indicating the location of the the data ball
+        data_ball               Either a string indicating the location of the the data ball,
+                                or the actual data ball.
         performance_threshold   A float (between 0 and 1, preferably) that indicates
                                 the minimum level of performance relative to the best
                                 performing surface.
+        max_surfaces            An integer that sets the limit for how many surfaces
+                                you want to report.
     Output:
-        best_surfaces   TDB
+        best_surfaces   A list of tuples containing the information for the best surfaces
+        labels          A tuple of strings indicating what the data in `best_surfaces` refer to
     '''
-    # Unpack the data structure
-    with open(data_ball_path, 'r') as f:
-        data_ball = pickle.load(f)
+    # Open the data ball if the user supplied a path
+    if isinstance(data_ball, str):
+        with open(data_ball, 'r') as f:
+            data_ball = pickle.load(f)
+    # Unpack the databall
     sim_data, unsim_data = data_ball
     sim_docs, predictions, _ = zip(*sim_data)
     cat_docs, estimations = zip(*unsim_data)
-    _, y_data_pred = zip(*predictions)
+    x_data_pred, y_data_pred = zip(*predictions)
+    x_pred, x_u_pred = zip(*x_data_pred)
     y_pred, y_u_pred = zip(*y_data_pred)
-    _, y_data_est = zip(*estimations)
+    x_data_est, y_data_est = zip(*estimations)
     y_est, y_u_est = zip(*y_data_est)
+    x_est, x_u_est = zip(*x_data_est)
 
     # Package the estimations and predictions together, because we don't
     # really care which they come from. Then zip it up so we can sort everything
     # at once.
     docs = list(sim_docs)
     docs.extend(list(cat_docs))
+    x = list(x_pred)
+    x.extend(list(x_est))
+    x_u = list(x_u_pred)
+    x_u.extend(list(x_u_est))
     y = list(y_pred)
     y.extend(list(y_est))
     y_u = list(y_u_pred)
     y_u.extend(list(y_u_est))
-    data = zip(docs, y, y_u)
+    data = zip(docs, x, x_u, y, y_u)
 
     # Sort the data so that the items with the highest `y` values are
     # at the beginning of the list
-    data = sorted(data, key=lambda datum: datum[1], reverse=True)
-    # Take out everything that hasn't performed well enough
+    data = sorted(data, key=lambda datum: datum[3], reverse=True)
+    # Take out everything that hasn't performed well enough, and trim some
+    # more rows if our data set exceeds the threshold
     y_max = data[0][1]
-    data = [(doc, _y, _y_u) for doc, _y, _y_u in data if _y > performance_threshold*y_max]
-    # Find the best performing surfaces
+    data = [(doc, _x, _x_u, _y, _y_u) for doc, _x, _x_u, _y, _y_u in data
+            if _y > performance_threshold*y_max]
+    if len(data) > max_surfaces:
+        del data[max_surfaces+1:]
+    # Find the best performing surfaces and pull out information that we want to pass along
     best_surfaces = []
-    for doc, _, _ in data:
+    for doc, _x, _x_u, _y, _y_u in data:
+        # Chemical formula (and a bunch of parsing to get rid of markers, adsorbates,
+        # and to simply/reduce stoichiometry)
+        formula = doc['formula']
+        formula = formula.replace('U', '')
+        # TODO:  Finish eliminating the adsorbate and fixing the stoichiometry
+        # elements = re.findall('[A-Z][^A-Z]*', formula)
+        # for i, element in enumerate(elements):
+        #     el, num = re.split('(\d+)', element)
+        # Material information
         mpid = doc['mpid']
         miller = tuple(doc['miller'])
-        surface = (mpid, miller)
+        top = doc['top']
+        # Performance metrics
+        energy = _x
+        performance = _y
+        surface = (mpid, formula, miller, top, energy, performance)
         best_surfaces.append(surface)
+    # Define the labels
+    labels = ('MPID', 'Formula', 'Miller', 'Top?', 'dE [eV]', 'Performance')
 
-    return best_surfaces
+    return best_surfaces, labels
 
 
 def _minimize_over(cat_docs, cat_values, sim_docs, sim_values, fp_blocks):
@@ -262,9 +294,9 @@ def _minimize_over(cat_docs, cat_values, sim_docs, sim_values, fp_blocks):
     # Now filter the inputs to create the outputs
     min_docs = []
     min_values = []
-    for i, value in enumerate(values):
+    for i, (doc, value) in enumerate(zip(docs, values)):
         if i in indices:
-            min_docs.append(docs[i])
+            min_docs.append(doc)
             min_values.append(value)
     min_values = np.array(min_values)
 
