@@ -124,7 +124,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     # We also save the uncertainties of each of these values [eV].
     # Uncertainties are affixed with `u`.
     sim_u = 0.1  # simulation uncertainty
-    model_u = regressor.rmses[regressor_block]['train+test']  # model uncertainty
+    model_u = regressor.rmses[regressor_block]['train']  # model uncertainty
     est_u = np.sqrt(sim_u**2 + model_u**2)  # total uncertainty of surrogate model
     ads_x_u = [sim_u]*len(ads_x)
     ads_y_u = [0.]*len(ads_y)

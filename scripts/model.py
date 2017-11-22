@@ -47,7 +47,7 @@ gp = GaussianProcessRegressor(
                              )
 H = GASpyRegressor(features=features, responses=responses,
                    blocks=blocks, vasp_settings=VASP_SETTINGS,
-                   fingerprints=fingerprints, train_size=0.99)
+                   fingerprints=fingerprints, train_size=1)
 H.fit_tpot(tpot, model_name=model_name)
 H.fit_hierarchical(gp, 'fit_sk', outer_features, model_name=model_name)
 

@@ -61,7 +61,7 @@ class GASpyRegressor(object):
                  fingerprints=None, vasp_settings=None,
                  collection='adsorption', energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
-                 train_size=0.75, random_state=42):
+                 train_size=0.80, k=10, random_state=42):
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -93,14 +93,24 @@ class GASpyRegressor(object):
                                 adsorption DB (eV)
             energy_max          The maximum adsorption energy to pull from the
                                 adsorption DB (eV)
+            f_max               The upper limit on the maximum force on an atom
+                                in the system
             ads_move_max        The maximum distance that an adsorbate atom may
                                 move (angstrom)
             bare_slab_move_max  The maxmimum distance that a slab atom may move
                                 when it is relaxed without an adsorbate (angstrom)
             slab_move_max       The maximum distance that a slab atom may move
                                 (angstrom)
-            f_max               The upper limit on the maximum force on an atom
-                                in the system
+        Inputs (data splitting options):
+            train_size          A float between 0 and 1 indicating the fraction of your
+                                data you want to allocate for training. If it is set to
+                                1, then we assume this is your "final model" and that
+                                you have to test set. This should be done only after
+                                tuning hyperparameters.
+            k                   A positive integer >= 1 indicating how many k-folds you
+                                want during cross-validation of the test set. 10 is a good
+                                number if you are still tuning. If you are creating the final
+                                model, then just use 1 to effectively skip cross-validation.
         Resulting attributes:
             features        Same thing as the input. Used mainly for making file_name to save
             responses       Same thing as the input. Used mainly for making file_name to save
@@ -154,7 +164,7 @@ class GASpyRegressor(object):
         if 'rnnc_count' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'  # noqa:  E501
+            fingerprints['nextnearestcoordination'] = '$processed_data.fp_final.nextnearestcoordination'
         if 'neighbors_coordcounts' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
@@ -221,27 +231,30 @@ class GASpyRegressor(object):
                 y.append(np.array(p_docs[response]))
             y = np.concatenate(tuple(y), axis=1)
 
-        # Split the inputs and outputs. We also pull out indices for splitting so
-        # that we can split `p_docs`
-        x_train, x_test, y_train, y_test, indices_train, indices_test = \
-            train_test_split(x, y, range(len(x)),
-                             train_size=train_size,
-                             random_state=random_state)
-        p_docs_train = {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()}
-        p_docs_test = {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()}
-
-        # Assign the information to the class attributes
-        self.x = {(None,): {'train': x_train,
-                               'test': x_test,
-                               'train+test': x}}
-        self.y = {(None,): {'train': y_train,
-                               'test': y_test,
-                               'train+test': y}}
-        self.p_docs = {(None,): {'train': p_docs_train,
-                                    'test': p_docs_test,
-                                    'train+test': p_docs}}
-        self.indices_train = indices_train
-        self.indices_test = indices_test
+        # If we're training on everything, then assign the data to the class attributes and move on
+        if train_size == 1:
+            self.x = {(None,): {'train': x}}
+            self.y = {(None,): {'train': y}}
+            self.p_docs = {(None,): {'train': p_docs}}
+        # If we're splitting, then start splitting
+        else:
+            x_train, x_test, y_train, y_test, indices_train, indices_test = \
+                train_test_split(x, y, range(len(x)),
+                                 train_size=train_size,
+                                 random_state=random_state)
+            p_docs_train = {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()}
+            p_docs_test = {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()}
+            self.x = {(None,): {'train': x_train,
+                                'test': x_test,
+                                'train+test': x}}
+            self.y = {(None,): {'train': y_train,
+                                'test': y_test,
+                                'train+test': y}}
+            self.p_docs = {(None,): {'train': p_docs_train,
+                                     'test': p_docs_test,
+                                     'train+test': p_docs}}
+            self.indices_train = indices_train
+            self.indices_test = indices_test
         self.pp = pp
 
         if blocks:
@@ -253,13 +266,13 @@ class GASpyRegressor(object):
             if 'adsorbate' in blocks:
                 for dataset in self.p_docs[(None,)]:
                     self.p_docs[(None,)][dataset]['adsorbate'] = \
-                            [adsorbates[0] for adsorbates in self.p_docs[(None,)][dataset]['adsorbates']]  # noqa:  E501
+                        [adsorbates[0] for adsorbates in self.p_docs[(None,)][dataset]['adsorbates']]
 
             # Warn the user if they're trying to block by something that they might not
             # be pulling
             for block in blocks:
                 if block not in self.p_docs[(None,)][dataset]:
-                    warnings.warn('You are trying to block by %s, but we did not find that fingerprint'  # noqa:  E501
+                    warnings.warn('You are trying to block by %s, but we did not find that fingerprint'
                                   % block)
 
             # `block_values` is a list of sublists, where each sublist contains all of the unique
@@ -269,7 +282,7 @@ class GASpyRegressor(object):
             # [['O', 'CO'], ['Top', 'Bottom']]. We use block_values to create `block_list`.
             block_values = []
             for block in blocks:
-                block_values.append(np.unique(self.p_docs[(None,)]['train+test'][block]).tolist())   # noqa:  E501
+                block_values.append(np.unique(self.p_docs[(None,)]['train'][block]).tolist())
             self.block_list = [block for block in itertools.product(*block_values)]
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
@@ -532,9 +545,9 @@ class GASpyRegressor(object):
 
         # Create the outer preprocessor
         try:
-            pp = GASpyPreprocessor(p_docs[(None,)]['train+test'], outer_features)
+            pp = GASpyPreprocessor(p_docs[(None,)]['train'], outer_features)
         except KeyError:
-            raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')  # noqa:  E501
+            raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')
         # Preprocess p_docs again, but this time for the outer regressor
         x = copy.deepcopy(self.x_inner)
         for block in x:
@@ -580,7 +593,7 @@ class GASpyRegressor(object):
         return predictions
 
 
-    def parity_plot(self, split=False, jupyter=True, plotter='plotly',  # noqa:  E501
+    def parity_plot(self, split=False, jupyter=True, plotter='plotly',
                     xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
                     fname='parity.png', s=None, font=None):
         '''
@@ -588,7 +601,8 @@ class GASpyRegressor(object):
 
         Input:
             split   A boolean indicating whether you want to plot train and test
-                    separately or together
+                    separately or together. Note that this is effectively ignored
+                    if you instantiated this class with `train_size == 1`.
             jupyter A boolean that you pass to tell this class whether you are
                     in a Jupyter notebook or not. This will change how it displays.
             plotter A string indicating the plotting tool you want to use. It can
@@ -634,16 +648,25 @@ class GASpyRegressor(object):
         if not self.x:
             raise Exception('Trying to plot without performing a fit first.')
 
+        # Initialize the outputs
+        y_out = {}
+        y_hat_out = {}
+        text_out = {}
+
         traces = []
         # Make a plotly trace for each block & dataset
         for block in self.errors:
+            # Define the data sets we want to plot via the `split` argument.
             if split:
                 datasets = ['train', 'test']
             else:
                 datasets = ['train+test']
+            # ...then hackily set the datasets if there is no test data,
+            # which happens when this class is instantiated with `train_size == 1`
+            if not hasattr(self, 'indices_test'):
+                datasets = ['train']
             for dataset in datasets:
                 # Unpack data from the class attributes
-                # x = self.x[block][dataset]
                 y = self.y[block][dataset]
                 p_docs = self.p_docs[block][dataset]
                 errors = self.errors[block][dataset]
@@ -664,10 +687,14 @@ class GASpyRegressor(object):
                                              name=str((block, dataset)),
                                              mode='markers',
                                              text=text))
+                    text_out[(block, dataset)] = text
                 elif plotter == 'matplotlib':
                     plt.scatter(y, y_hat, s=s)
                 else:
                     raise Exception('"%s" is an unrecognized argument for "plotter"', plotter)
+                # Add the information to the output to return
+                y_out[(block, dataset)] = y
+                y_hat_out[(block, dataset)] = y_hat
 
         # Make a parity line
         if plotter == 'plotly':
@@ -692,8 +719,5 @@ class GASpyRegressor(object):
             plt.savefig(fname, bbox_inches='tight')
             plt.show()
 
-        # TODO:  Return all blocks of information, not just the latest block
-        if plotter == 'plotly':
-            return y, y_hat, text
-        elif plotter == 'matplotlib':
-            return y, y_hat
+        # Return the data in case the user wants to do something with it
+        return y_out, y_hat_out, text_out
