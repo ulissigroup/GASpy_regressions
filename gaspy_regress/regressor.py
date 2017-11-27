@@ -472,41 +472,6 @@ class GASpyRegressor(object):
         self.models = models
 
 
-    # TODO:  Write this part. Try to figure out/remember how to get the lambda function
-    # out of the alamopy output so that we can apply it to the other data sets
-    def fit_alamo(self, x_dict=None, y_dict=None, blocks=None, **kwargs):
-        '''
-        Use alamopy to perform the regression.
-
-        Inputs:
-            x_dict  The same thing as `self.x`, but the user may specify something
-                    to use instead of `self.x`.
-            y_dict  The same thing as `self.y`, but the user may specify something
-                    to use instead of `self.y`.
-            blocks      A list of tuples indicating the blocks that you want to perform
-                        the regression on.
-            kwargs  The same key word arguments that you would pass to alamopy.doalamo,
-                    excluding the training and testing data.
-        '''
-        self.model_name = 'alamo'
-        # Set defaults
-        if not x_dict:
-            x_dict = self.x
-        if not y_dict:
-            y_dict = self.y
-        if not blocks:
-            blocks = self.block_list
-
-        _predict = 'foo'
-        rmses = 'foo'
-        errors = 'bar'
-
-        # Assign the attributes
-        self._predict = _predict
-        self.rmses = rmses
-        self.errors = errors
-
-
     def fit_hierarchical(self, outer_regressor, outer_method, outer_features,
                          blocks=None, model_name=None):
         '''
