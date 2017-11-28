@@ -48,8 +48,8 @@ sheet = args.gsheet
 worksheet = args.worksheet
 prediction_path = args.predictions
 comparisons_path = args.comparison_predictions
-identifying_labels = args.identifying_labels.split(', ')
-reporting_labels = args.reporting_labels.split(', ')
+identifying_labels = args.identifying_labels
+reporting_labels = args.reporting_labels
 comparison_name = args.comparison_name
 
 # If the user passed a path, then just open the data ball.
@@ -72,6 +72,8 @@ best_surfaces, labels = gaspy_regress.predict.best_surfaces(data_ball, performan
 
 # Now do the same thing for the data ball of comparison data
 if comparisons_path:
+    identifying_labels = identifying_labels.split(', ')
+    reporting_labels = reporting_labels.split(', ')
     with open(comparisons_path, 'r') as f:
         comparison_ball = pickle.load(f)
     comparisons, _ = gaspy_regress.predict.best_surfaces(comparison_ball, performance_threshold=0.,
