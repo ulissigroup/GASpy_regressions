@@ -61,7 +61,7 @@ class GASpyRegressor(object):
                  fingerprints=None, vasp_settings=None,
                  collection='adsorption', energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
-                 train_size=0.80, k=10, random_state=42):
+                 train_size=0.80, n_bins=20, k_folds=10, random_state=42):
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -69,15 +69,15 @@ class GASpyRegressor(object):
         want to pull.
 
         Inputs (regression options):
-            features            A list of strings for each of the features that you want
-                                to include.  These strings should correspond to the
-                                1st-level hidden methods in `GASpyPreprocessor`, but
-                                without the leading underscore.  For example:
-                                features = ('coordcount', 'ads')
-            responses           A list of strings for each of the responses that you
-                                want to include.  Pretty much just like features.
-            blocks              A list of strings for each of the fingerprints on which
-                                the user wants to block
+            features    A list of strings for each of the features that you want
+                        to include.  These strings should correspond to the
+                        1st-level hidden methods in `GASpyPreprocessor`, but
+                        without the leading underscore.  For example:
+                        features = ('coordcount', 'ads')
+            responses   A list of strings for each of the responses that you
+                        want to include.  Pretty much just like features.
+            blocks      A list of strings for each of the fingerprints on which
+                        the user wants to block
         Inputs (pulling/filtering options):
             fingerprints        Mongo queries of parameters that you want pulled.
                                 Note that we automatically set some of these queries
@@ -102,15 +102,17 @@ class GASpyRegressor(object):
             slab_move_max       The maximum distance that a slab atom may move
                                 (angstrom)
         Inputs (data splitting options):
-            train_size          A float between 0 and 1 indicating the fraction of your
-                                data you want to allocate for training. If it is set to
-                                1, then we assume this is your "final model" and that
-                                you have to test set. This should be done only after
-                                tuning hyperparameters.
-            k                   A positive integer >= 1 indicating how many k-folds you
-                                want during cross-validation of the test set. 10 is a good
-                                number if you are still tuning. If you are creating the final
-                                model, then just use 1 to effectively skip cross-validation.
+            train_size  A float between 0 and 1 indicating the fraction of your
+                        data you want to allocate for training. If it is set to
+                        1, then we assume this is your "final model" and that
+                        you have to test set. This should be done only after
+                        tuning hyperparameters.
+            n_bins      A positive integer for how many bins you want to use to stratify the root
+                        train/test split. This is ignored if train_size == 1.
+            k_folds     A positive integer >= 1 indicating how many k-folds you
+                        want during cross-validation of the test set. 10 is a good
+                        number if you are still tuning. If you are creating the final
+                        model, then just use 1 to effectively skip cross-validation.
         Resulting attributes:
             features        Same thing as the input. Used mainly for making file_name to save
             responses       Same thing as the input. Used mainly for making file_name to save
@@ -238,12 +240,24 @@ class GASpyRegressor(object):
             self.p_docs = {(None,): {'train': p_docs}}
         # If we're splitting, then start splitting
         else:
-            x_train, x_test, y_train, y_test, indices_train, indices_test = \
-                train_test_split(x, y, range(len(x)),
-                                 train_size=train_size,
-                                 random_state=random_state)
+            # We make bins and put our predictions into these bins. This gives us `y_binned`, which
+            # SK's `train_test_split` can then use to do a stratified train/test split. We have an
+            # EAFP wrapper to make sure that the user specifies a small enough number of bins.
+            bins = np.linspace(0, len(y), n_bins)
+            y_binned = np.digitize(y, bins)
+            try:
+                x_train, x_test, y_train, y_test, indices_train, indices_test = \
+                    train_test_split(x, y, range(len(x)),
+                                     train_size=train_size,
+                                     stratify=y_binned,
+                                     random_state=random_state)
+            except ValueError as err:
+                err.message += '; you should decrease n_bins'
+                raise
+            # We also use the train/test indices to recreate p_docs
             p_docs_train = {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()}
             p_docs_test = {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()}
+            # Now store the information in class attributes
             self.x = {(None,): {'train': x_train,
                                 'test': x_test,
                                 'train+test': x}}
@@ -256,6 +270,9 @@ class GASpyRegressor(object):
             self.indices_train = indices_train
             self.indices_test = indices_test
         self.pp = pp
+
+        # Now do the k-folding on the training set
+        # if k_folds > 1:
 
         if blocks:
             # TODO:  Address this when we start doing co-adsorption.
