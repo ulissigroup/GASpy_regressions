@@ -32,10 +32,10 @@ class GASpyRegressor(object):
     All of the `fit_*` methods have similar output structures. Here it is:
 
     Outputs:
-        rmses       A nested dictionary whose first set of keys are the block ((None,) if there
-                    is no blocking). The second set of keys are the dataset (i.e., 'train',
-                    'test', or 'train+test'. The values of the sub-dictionary are the
-                    root-mean-squared-error of the model for the corresponding block
+        rmses       A nested dictionary whose first set of keys are the block---(None,) if there
+                    is no blocking. The second set of keys are the split data set
+                    (e.g., 'train', 'test', or 'all data'. The values of the sub-dictionary
+                    are the root-mean-squared-error of the model for the corresponding block
                     and dataset.
         errors      The same as `rmses`, but it returns an np.array of errors instead of a
                     float of RMSE values.
@@ -43,9 +43,7 @@ class GASpyRegressor(object):
         model_name  A string indicating the name of the method used. This is useful for
                     labeling the plots in the `parity_plot` method.
         rmses       A nested dictionary with the following structure:
-                    rmses = {'block': {'train': RMSE,
-                                       'test': RMSE,
-                                       'train+test': RMSE}}
+                    rmses = {'block': {'split_data_set': RMSE}}
         errors      The same thing as `rmses`, but instead of RMSE values, they're
                     np.arrays of the errors
         _predict    A function that can turn turn a preprocessed input into a prediction.
@@ -61,7 +59,7 @@ class GASpyRegressor(object):
                  fingerprints=None, vasp_settings=None,
                  collection='adsorption', energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
-                 train_size=0.80, n_bins=20, k_folds=10, random_state=42):
+                 train_size=1, dev_size=None, n_bins=20, k_folds=None, random_state=42):
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -103,24 +101,29 @@ class GASpyRegressor(object):
                                 (angstrom)
         Inputs (data splitting options):
             train_size  A float between 0 and 1 indicating the fraction of your
-                        data you want to allocate for training. If it is set to
-                        1, then we assume this is your "final model" and that
-                        you have to test set. This should be done only after
-                        tuning hyperparameters.
-            n_bins      A positive integer for how many bins you want to use to stratify the root
-                        train/test split. This is ignored if train_size == 1.
+                        data you want to allocate for training/development. If
+                        it is set to 1, then we assume this is your "final model"
+                        and that you have no test set. This should be done only
+                        after tuning hyperparameters. Defaults to 1
+            dev_size    A float between 0 and 1 indicating the fraction of the total
+                        data that you want to allocate for development. Assuming that you
+                        have a lot of data, we recommend a 70/20/10 split between training,
+                        development, and test sets, respectively. So `train_size == 0.7`
+                        and `dev_size == 0.2`. The test size is implicit. Note that
+                        `dev_size` is ignored if `train_size == 1`. Defaults to `None`,
+                        which yields do development set.
             k_folds     A positive integer >= 1 indicating how many k-folds you
                         want during cross-validation of the test set. 10 is a good
-                        number if you are still tuning. If you are creating the final
-                        model, then just use 1 to effectively skip cross-validation.
+                        number if you are still tuning. Defaults to `None`, which skips
+                        cross-validation.
+            n_bins      A positive integer for how many bins you want to use to stratify the root
+                        train/test split. This is ignored if train_size == 1. Defaults to 20
         Resulting attributes:
             features        Same thing as the input. Used mainly for making file_name to save
             responses       Same thing as the input. Used mainly for making file_name to save
             blocks          Same thing as the input. Used mainly for making file_name to save
             x               A nested dictionary with the following structure:
-                            x = {'block': {'train': np.array(INPUT_DATA),
-                                           'test': np.array(INPUT_DATA),
-                                           'train+test': np.array(INPUT_DATA)}
+                            x = {'block': {'split_data_set': np.array(INPUT_DATA)}}
             y               The same as `x`, but for the outputs, not the inputs
             p_docs          The same as `x`, but the dict values are not np.arrays of data.
                             Instead, they are dictionaries with structures analogous to the
@@ -207,16 +210,16 @@ class GASpyRegressor(object):
 
         # Pull the data into parsed mongo documents (i.e., a dictionary of lists), `p_docs`
         with gasdb.get_adsorption_client() as client:
-            _, p_docs = gasdb.get_docs(client, collection, fingerprints,
-                                       adsorbates=None,
-                                       calc_settings=None,
-                                       vasp_settings=vasp_settings,
-                                       energy_min=energy_min,
-                                       energy_max=energy_max,
-                                       f_max=f_max,
-                                       ads_move_max=ads_move_max,
-                                       bare_slab_move_max=bare_slab_move_max,
-                                       slab_move_max=slab_move_max)
+            docs, p_docs = gasdb.get_docs(client, collection, fingerprints,
+                                          adsorbates=None,
+                                          calc_settings=None,
+                                          vasp_settings=vasp_settings,
+                                          energy_min=energy_min,
+                                          energy_max=energy_max,
+                                          f_max=f_max,
+                                          ads_move_max=ads_move_max,
+                                          bare_slab_move_max=bare_slab_move_max,
+                                          slab_move_max=slab_move_max)
         if not p_docs.values()[0]:
             raise Exception('Failed to find any data. Please check your query settings.')
 
@@ -234,45 +237,48 @@ class GASpyRegressor(object):
             y = np.concatenate(tuple(y), axis=1)
 
         # If we're training on everything, then assign the data to the class attributes and move on
+        self.pp = pp
         if train_size == 1:
             self.x = {(None,): {'train': x}}
             self.y = {(None,): {'train': y}}
             self.p_docs = {(None,): {'train': p_docs}}
         # If we're splitting, then start splitting
         else:
-            # We make bins and put our predictions into these bins. This gives us `y_binned`, which
-            # SK's `train_test_split` can then use to do a stratified train/test split. We have an
-            # EAFP wrapper to make sure that the user specifies a small enough number of bins.
-            bins = np.linspace(0, len(y), n_bins)
-            y_binned = np.digitize(y, bins)
-            try:
-                x_train, x_test, y_train, y_test, indices_train, indices_test = \
-                    train_test_split(x, y, range(len(x)),
-                                     train_size=train_size,
-                                     stratify=y_binned,
-                                     random_state=random_state)
-            except ValueError as err:
-                err.message += '; you should decrease n_bins'
-                raise
-            # We also use the train/test indices to recreate p_docs
-            p_docs_train = {fp: np.array(values)[indices_train] for fp, values in p_docs.iteritems()}
-            p_docs_test = {fp: np.array(values)[indices_test] for fp, values in p_docs.iteritems()}
+            x_train, x_test, y_train, y_test, docs_train, docs_test = \
+                self._stratified_split(n_bins, train_size, random_state, x, y, docs)
+            # We could only do a split on `docs`. But we actually want `p_docs`. Convert here.
+            p_docs_train = utils.docs_to_pdocs(docs_train)
+            p_docs_test = utils.docs_to_pdocs(docs_test)
             # Now store the information in class attributes
-            self.x = {(None,): {'train': x_train,
-                                'test': x_test,
-                                'train+test': x}}
-            self.y = {(None,): {'train': y_train,
-                                'test': y_test,
-                                'train+test': y}}
-            self.p_docs = {(None,): {'train': p_docs_train,
-                                     'test': p_docs_test,
-                                     'train+test': p_docs}}
-            self.indices_train = indices_train
-            self.indices_test = indices_test
-        self.pp = pp
+            self.x = {(None,): {'test': x_test,
+                                'all data': x}}
+            self.y = {(None,): {'test': y_test,
+                                'all data': y}}
+            self.p_docs = {(None,): {'test': p_docs_test,
+                                     'all data': p_docs}}
+            # Do it all again, but for the development set. Note that we re-calculate
+            # `dev_size` because we're splitting from the training set, not the whole set.
+            if dev_size:
+                dev_size = dev_size/train_size
+                x_train, x_dev, y_train, y_dev, docs_train, docs_dev = \
+                    self._stratified_split(n_bins, dev_size, random_state,
+                                           x_train, y_train, docs_train)
+                p_docs_train = utils.docs_to_pdocs(docs_train)
+                p_docs_dev = utils.docs_to_pdocs(docs_dev)
+                self.x[(None,)]['dev'] = x_dev
+                self.y[(None,)]['dev'] = y_dev
+                self.p_docs[(None,)]['dev'] = p_docs_dev
+            self.x[(None,)]['train'] = x_train
+            self.y[(None,)]['train'] = y_train
+            self.p_docs[(None,)]['train'] = p_docs_train
 
         # Now do the k-folding on the training set
-        # if k_folds > 1:
+        if k_folds:
+            # Unpack the data we'll be folding
+            x = self.x[(None,)]['train']
+            y = self.y[(None,)]['train']
+            p_docs = self.p_docs[(None,)]['train']
+            docs = utils.pdocs_to_docs(p_docs)
 
         if blocks:
             # TODO:  Address this when we start doing co-adsorption.
@@ -290,7 +296,7 @@ class GASpyRegressor(object):
             for block in blocks:
                 if block not in self.p_docs[(None,)][dataset]:
                     warnings.warn('You are trying to block by %s, but we did not find that fingerprint'
-                                  % block)
+                                  % block, SyntaxWarning)
 
             # `block_values` is a list of sublists, where each sublist contains all of the unique
             # values for each of the fingerprints specified in `blocks`. The order of the sublists
@@ -314,6 +320,43 @@ class GASpyRegressor(object):
             self.block_list = [(None,)]
 
 
+    def _stratified_split(self, n_bins=20, train_size=0.80, random_state=42, *arrays):
+        '''
+        Perform a stratified train/test split. Note that you can pass any number of arrays to split,
+        but the stratification is done one the first array that you pass to this method.
+
+        Inputs:
+            n_bins          A positive integer indicating the number of bins to use during
+                            stratification. Higher values lead to better stratification,
+                            but may also lead to too few data points per bin.
+            train_size      A float between 0 and 1 that indicates the training size you want
+                            to split by.
+            random_state    Any number that you can feed to SKLearn's `train_test_split`
+            *arrays         Arrays that you can pass to SKLearn's `train_test_split`. You need
+                            at least one array.
+        Outputs:
+            split_data      A tuple of information created by SKLearn's `train_test_split`
+        '''
+        # Pull out the array that we'll be stratifying on and call it `y`
+        y = arrays[0]
+
+        # We make bins and put our predictions into these bins. This gives us `y_binned`,
+        # which SK's `train_test_split` can then use to do a stratified train/test split.
+        bins = np.linspace(0, len(y), n_bins)
+        y_binned = np.digitize(y, bins)
+
+        # We have an EAFP wrapper to make sure that the user specifies
+        # a small enough number of bins.
+        try:
+            split_data = train_test_split(*arrays, train_size=train_size,
+                                          stratify=y_binned, random_state=random_state)
+        except ValueError as err:
+            err.message += '; you should decrease n_bins'
+            raise
+
+        return split_data
+
+
     def _filter(self, data, blocks, block):
         '''
         Filter the `data` according to the `block` that it belongs to.
@@ -321,7 +364,7 @@ class GASpyRegressor(object):
         I hurt my brain writing it. Feel free to pick it apart to make it easier to read.
 
         Inputs:
-            data        A dictionary whose keys are 'train+test', 'train', and 'test'.
+            data        A dictionary whose keys are 'all data', 'train', and 'test'.
                         The values are numpy arrays of data that are yielded by `PullFeatures`...
                         or they are dictionaries of parsed mongo data are also yielded by
                         `PullFeatures`
@@ -404,7 +447,7 @@ class GASpyRegressor(object):
             models[block].fit(x_dict[block]['train'], y_dict[block]['train'])
 
             # Post-process the results for each set of training, testing, and
-            # train+test data
+            # all data
             for dataset, y in y_dict[block].iteritems():
                 y_hat = models[block].predict(x_dict[block][dataset])
                 mse = metrics.mean_squared_error(y, y_hat)
@@ -469,7 +512,7 @@ class GASpyRegressor(object):
             models[block] = models[block].fitted_pipeline_
 
             # Post-process the results for each set of training, testing, and
-            # train+test data
+            # all data
             for dataset, y in y_dict[block].iteritems():
                 y_hat = models[block].predict(x_dict[block][dataset])
                 mse = metrics.mean_squared_error(y, y_hat)
@@ -640,13 +683,13 @@ class GASpyRegressor(object):
         for block in self.errors:
             # Define the data sets we want to plot via the `split` argument.
             if split:
-                datasets = ['train', 'test']
+                datasets = self.x[(None,)].keys()
+                try:
+                    datasets.remove('all data')  # Remove redundant plots
+                except ValueError:
+                    pass
             else:
-                datasets = ['train+test']
-            # ...then hackily set the datasets if there is no test data,
-            # which happens when this class is instantiated with `train_size == 1`
-            if not hasattr(self, 'indices_test'):
-                datasets = ['train']
+                datasets = ['all data']
             for dataset in datasets:
                 # Unpack data from the class attributes
                 y = self.y[block][dataset]
