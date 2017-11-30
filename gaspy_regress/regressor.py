@@ -239,9 +239,12 @@ class GASpyRegressor(object):
         # If we're training on everything, then assign the data to the class attributes and move on
         self.pp = pp
         if train_size == 1:
-            self.x = {(None,): {'train': x}}
-            self.y = {(None,): {'train': y}}
-            self.p_docs = {(None,): {'train': p_docs}}
+            self.x = {(None,): {'train': x,
+                                'all data': x}}
+            self.y = {(None,): {'train': y,
+                                'all data': y}}
+            self.p_docs = {(None,): {'train': p_docs,
+                                     'all data': p_docs}}
         # If we're splitting, then start splitting
         else:
             x_train, x_test, y_train, y_test, docs_train, docs_test = \
