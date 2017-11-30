@@ -7,7 +7,6 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa: F401
-import re
 import pickle
 import numpy as np
 import pandas as pd
@@ -216,13 +215,14 @@ def best_surfaces(data_ball, performance_threshold, max_surfaces=1000):
         mpid = doc['mpid']
         miller = tuple(doc['miller'])
         top = doc['top']
+        mongo_id = doc['mongo_id']
         # Performance metrics
         energy = _x
         performance = _y
-        surface = (mpid, formula, miller, top, energy, performance)
+        surface = (mpid, formula, miller, top, energy, performance, mongo_id)
         best_surfaces.append(surface)
     # Define the labels
-    labels = ('MPID', 'Formula', 'Miller', 'Top?', 'dE [eV]', 'Performance')
+    labels = ('MPID', 'Formula', 'Miller', 'Top?', 'dE [eV]', 'Performance', 'Mongo ID')
 
     return best_surfaces, labels
 
