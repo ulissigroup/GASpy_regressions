@@ -1,4 +1,13 @@
-#!/bin/sh
+#!/bin/sh -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=06:00:00
+#SBATCH --partition=regular
+#SBATCH --job-name=predict
+#SBATCH --output=predict-%j.out
+#SBATCH --error=predict-%j.error
+#SBATCH --constraint=haswell
 
 # Go back to home directory, then go to GASpy
 cd

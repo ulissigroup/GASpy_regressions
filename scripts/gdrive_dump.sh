@@ -1,4 +1,13 @@
-#!/bin/sh
+#!/bin/sh -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=00:30:00
+#SBATCH --partition=regular
+#SBATCH --job-name=gdrive_dump
+#SBATCH --output=gdrive_dump-%j.out
+#SBATCH --error=gdrive_dump-%j.error
+#SBATCH --constraint=haswell
 
 # Go back to home directory, then go to GASpy
 cd
