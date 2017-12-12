@@ -9,9 +9,5 @@
 #SBATCH --error=predict-%j.error
 #SBATCH --constraint=haswell
 
-# Load GASpy
-. ~/GASpy/scripts/load_env.sh
-cd $GASPY_REG_PATH/scripts
-
 # Use a surrogate model to make predictions
-python predict.py
+python -c "from gaspy_regress.perform import prediction; prediction()"

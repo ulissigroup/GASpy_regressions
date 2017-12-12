@@ -9,9 +9,5 @@
 #SBATCH --error=model-%j.error
 #SBATCH --constraint=haswell
 
-# Load GASpy
-. ~/GASpy/scripts/load_env.sh
-cd $GASPY_REG_PATH/scripts
-
 # Create and save a surrogate model
-python model.py
+python -c "from gaspy_regress.perform import modeling; modeling()"
