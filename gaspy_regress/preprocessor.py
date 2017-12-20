@@ -9,58 +9,9 @@ __email__ = 'ktran@andrew.cmu.edu'
 import pdb  # noqa:  F401
 import copy
 from collections import OrderedDict
-#import multiprocessing
-from functools import partial
 import numpy as np
 from sklearn import preprocessing
-
-
-def coord_to_coordcount(lb, x):
-    '''
-    Convert a single coordination string into a vector of elemental coordination counts.
-    Note that this is a module function so that we can call it with the `multiprocessing`
-    module.
-
-    Inputs:
-        lb  Label binarizing object with a `transform` method to convert a list of strings
-            into an array of coordination counts
-        x   A string indicating the coordination you want to vectorize
-    Output:
-        A numpy vector for coordination count
-    '''
-    return np.sum(lb.transform(x.split('-')), axis=0)
-
-
-def coord_to_neighborcoordcount(n_symbols, lb, coord_strings):
-    '''
-    Convert a list of coordination strings into an array of elemental coordination counts.
-    Note that this is a module function so that we can call it with the `multiprocessing`
-    module.
-
-    Inputs:
-        n_symbols       The number of elements we are considering
-        lb              Label binarizing object with a `transform` method to convert a
-                        list of strings into an array of coordination counts
-        coord_strings   A list of strings `neighborcoord` strings
-    '''
-    # Initialize
-    coordcount_array = np.zeros((n_symbols, n_symbols), dtype=np.int64)
-
-    for coord_string in coord_strings:
-        # Unpack the information and then calculate the coordcount for this neighbor
-        neighbor, coord = coord_string.split(':')
-        coordcount = coord_to_coordcount(lb, coord)
-
-        # Find the row within the array that this neighbor should map to, then add
-        # the coordcount to the array
-        neighbors_index, = np.where(coord_to_coordcount(lb, neighbor) == 1)
-        coordcount_array[neighbors_index, :] += np.array(coordcount)
-
-        # Flatten the array into a vector so that our regressors can use it,
-        # and then add it to the output
-        coordcount_vector = np.concatenate(coordcount_array, axis=0)
-
-    return coordcount_vector
+from gaspy import utils
 
 
 class GASpyPreprocessor(object):
@@ -70,17 +21,16 @@ class GASpyPreprocessor(object):
     into a single numpy array. The preprocessing functions are created in the hidden
     methods (i.e., ones that start with `_`).
     '''
-    # pylint: disable=missing-docstring
-    def __init__(self, p_docs, features):
+    def __init__(self, docs, features):
         '''
         This `__init__` method creates the list of preprocessing functions, `preprocessors`.
         It also creates the feature scaler, `scaler`. In other words:  This class is ready
         to start preprocessing right after it's instantiated. No need to do a `.fit`.
 
         Input:
-            p_docs      The parsed mongo docs that you want to pre-process into features.
-                        Note that these parsed mongo docs are used to create the preprocessing
-                        algorithms. The parsed mongo docs passed to the `transform` method
+            docs        The  mongo docs that you want to pre-process into features.
+                        Note that these mongo docs are used to create the preprocessing
+                        algorithms. The mongo docs passed to the `transform` method
                         will be transformed using the algoritms created by `__init__`.
             features    A list of strings, where each string corresponds to the
                         feature that you want to be created. The available strings are the
@@ -88,74 +38,66 @@ class GASpyPreprocessor(object):
                         (e.g., 'coordcount'). Order matters, because the pre-processed
                         features will be stacked in order of appearance in this list.
         Resulting attributes:
-            p_docs          The same as the `p_docs` input, but simply saved as an attribute
+            docs            The same as the `docs` input, but simply saved as an attribute
             preprocessors   An ordered dictionary whose keys are features and whose
                             values are the sklearn.preprocessing classes for each feature
             scaler          An instance of the sklearn.preprocessing.StandardScaler class
-                            that has been fit to the preprocessed, stacked `p_docs`
+                            that has been fit to the preprocessed, stacked `docs`
         '''
-        self.p_docs = p_docs
+        self.docs = docs
 
         # Create the preprocessors for each feature
         self.preprocessors = OrderedDict.fromkeys(features)
         for feature in features:
             self.preprocessors[feature] = getattr(self, '_' + feature)()
 
-        # Partially preprocess the fingerprints
-        numerical_features = [preprocessor(p_docs) for preprocessor in self.preprocessors.values()]
-        # Stack the partially preprocessed fingerprints (if necessary)
-        if len(numerical_features) > 1:
-            stacked_features = []
-            for i in range(len(numerical_features[0])):
-                datum = [numerical_feature[i] for numerical_feature in numerical_features]
-                stacked_features.append(np.concatenate(tuple(datum)))
-            stacked_features = np.array(stacked_features)
-        elif len(numerical_features) == 1:
-            stacked_features = numerical_features[0]
+        # Partially preprocess the fingerprints, then stack them into a numpy array
+        numerical_features = [preprocess(docs) for preprocess in self.preprocessors.values()]
+        stacked_features = np.concatenate(tuple(numerical_features), axis=1)
 
         # Create and fit the scaler
         self.scaler = preprocessing.StandardScaler()
-        self.scaler.fit_transform(stacked_features)
+        self.scaler.fit(stacked_features)
 
 
-    def _energy(self, p_docs=None):
+    def _energy(self, docs=None):
         '''
         Create a preprocessing function for adsorption energy. Yes, this is pretty silly.
         But it's CONSISTENT!
 
         Input:
-            p_docs  Parsed mongo dictionaries. Default value of `None` yields `self.p_docs`
+            docs  Mongo json dictionaries. Default value of `None` yields `self.docs`
         Output:
             preprocess_energy   Function to turn floats into a numpy array
         '''
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
 
-        def preprocess_energy(p_docs):
-            return np.array(p_docs)
+        def preprocess_energy(docs):
+            return np.array([doc['energy'] for doc in docs])
 
         return preprocess_energy
 
 
-    def __create_symbol_lb(self, p_docs=None):
+    def __create_symbol_lb(self, docs=None):
         '''
         Create a label binarizer that can convert a symbol string into a binary vector
 
         Inputs:
-            p_docs  Parsed mongo dictionaries over which to perform the fitting.
-                    Default value of `None` yields `self.p_docs`
+            docs    Mongo json dictionaries over which to perform the fitting.
+                    Default value of `None` yields `self.docs`
         Outputs:
             lb          The label binarizer used to turn the string into an array of binary counts
-            coordcount  The actual vector of integers that are the preprocessed form of `p_docs`
+            coordcount  The actual vector of integers that are the preprocessed form of `docs`
         '''
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
 
-        # Pull out all of the symbols that we can find in `p_docs`
-        symbols = [symbols for symbols in p_docs['symbols']
+        # Pull out all of the symbols that we can find in `docs`
+        symbols = [doc['symbols'] for doc in docs
                    # TODO:  Remove this conditional after we start looking at carbides
                    # or oxides. We only put this here to appease ALAMO
-                   if (symbols != 'C' and symbols != 'O')]
+                   if (doc['symbols'] != 'C' and doc['symbols'] != 'O')]
 
         # Find all of the unique symbols. Then fit a label binarizer on them
         # that will be able to convert a single string into a binary vector.
@@ -166,25 +108,25 @@ class GASpyPreprocessor(object):
         return lb
 
 
-    def _coordcount(self, p_docs=None, return_lb=False):
+    def _coordcount(self, docs=None, return_lb=False):
         '''
         Create a preprocessing function for coordination count
 
         Input:
-            p_docs      Parsed mongo dictionaries. Default value of `None` yields `self.p_docs`
+            docs        Mongo json dictionaries. Default value of `None` yields `self.docs`
             return_lb   If `True`, then return the binarizer. Used mainly by the `_rnnc_cou
         Output:
-            preprocess_coordcount   Function to preprocess parsed mongo docs into
+            preprocess_coordcount   Function to preprocess mongo docs into
                                     an array of binary vectors
             lb                      The label binarizer fitted to the symbols
         '''
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
 
         # Create a label binarizer to convert a single symbol string into a vector of binaries
-        lb = self.__create_symbol_lb(p_docs)
+        lb = self.__create_symbol_lb(docs)
 
-        def preprocess_coordcount(p_docs):
+        def preprocess_coordcount(docs):
             '''
             Transform mongo documents into a vector of integers.
             We do this by using the binarizer to turn a coordination into a
@@ -192,16 +134,14 @@ class GASpyPreprocessor(object):
             into [[1 0 0 0 0], [0 1 0 0 0], [0 1 0 0 0]]. We then use np.sum
             to sum each list into a coordcount, [1 2 0 0 0].
             '''
-            # Unpack
-            coords = p_docs['coordination']
-
-            #pool = multiprocessing.pool.Pool(16)
-            #coordcounts = pool.map(partial(coord_to_coordcount, lb), coords)
-            #pool.close()
-            coordcounts = map(partial(coord_to_coordcount, lb), coords)
-
-            coordcounts = np.array(coordcounts)
-            return coordcounts
+            # Package the calculation into a function so that we can parallelize it
+            def _preprocess_coordcount(doc):  # noqa: E306
+                coord = doc['coordination']
+                coordcount = np.sum(lb.transform(coord.split('-')), axis=0)
+                return coordcount
+            # Use GASpy multiprocessing to do the calculation
+            coordcounts = utils.map(_preprocess_coordcount, docs)
+            return np.array(coordcounts)
 
         if not return_lb:
             return preprocess_coordcount
@@ -209,55 +149,59 @@ class GASpyPreprocessor(object):
             return preprocess_coordcount, lb
 
 
-    def _rnnc_count(self, p_docs=None):
+    def _rnnc_count(self, docs=None):
         '''
         Create a preprocessing function for reduced, next-nearest-neighbor coordination count.
         The "reduced" part means that we subtract out coordcount from next-nearest-neighbor count.
 
         Input:
-            p_docs  Parsed mongo dictionaries. Default value of `None` yields `self.p_docs`
+            docs    Mongo json dictionaries. Default value of `None` yields `self.docs`
         Output:
-            preprocess_rnnc_count   Function to preprocess parsed mongo docs into
+            preprocess_rnnc_count   Function to preprocess mongo docs into
                                     an array of binary vectors
         '''
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
 
         # Create a label binarizer to convert a single symbol string into a vector of binaries
-        preprocess_coordcount, lb = self._coordcount(p_docs, return_lb=True)
+        preprocess_coordcount, lb = self._coordcount(docs, return_lb=True)
 
-        def preprocess_rnnc_count(p_docs):
+        def preprocess_rnnc_count(docs):
             '''
             We do the same thing that we do in the `_coordcount` method, but for
             nextnearestcoordination instead. And then we substract out `coordcount`.
             '''
-            # Unpack
-            nncs = p_docs['nextnearestcoordination']
-            # Calculate
-            nnc_counts = np.array([np.sum(lb.transform(nnc.split('-')), axis=0)
-                                   for nnc in nncs])
-            rnnc_counts = nnc_counts - preprocess_coordcount(p_docs)
-            return rnnc_counts
+            # Package the calculation into a function so that we can parallelize it
+            def _preprocess_rnnc_count(doc):  # noqa: E306
+                ''' Yes, this is hacky. Please don't judge me. '''
+                coord = doc['coordination']
+                nnc = doc['nextnearestcoordination']
+                nnc_count = np.sum(lb.transform(nnc.split('-')), axis=0)
+                coordcount = preprocess_coordcount([{'coordination': coord}])
+                rnnc_count = nnc_count - coordcount
+                return list(rnnc_count)
+            # Use GASpy multiprocessing to do the calculation
+            rnnc_counts = utils.map(_preprocess_rnnc_count, docs)
+            return np.array(rnnc_counts)
 
         return preprocess_rnnc_count
 
 
-    def _ads(self, p_docs=None):
+    def _ads(self, docs=None):
         '''
         Create a preprocessing function for adsorbate identity.
 
         Input:
-            p_docs  Parsed mongo dictionaries. Default value of `None` yields `self.p_docs`
+            docs    Mongo json dictionaries. Default value of `None` yields `self.docs`
         Output:
-            preprocess_ads  Function to preprocess parsed mongo docs into
-                            an array of binary vectors
+            preprocess_ads  Function to preprocess mongo docs into an array of binary vectors
         '''
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
 
         # The 'adsorbates' key returns adsorbates. We're only looking at one right now,
         # so we pull it out into a single-layered list (instead of a nested list).
-        adsorbates = [adsorbates[0] for adsorbates in p_docs['adsorbates']]
+        adsorbates = [adsorbates[0] for adsorbates in docs['adsorbates']]
 
         # Find all of the unique adsorbate types. Then fit a label binarizer on them
         # that will be able to convert a single string into a binary vector.
@@ -266,153 +210,155 @@ class GASpyPreprocessor(object):
         lb.fit(ads)
 
         # Create the preprocessing function
-        def preprocess_ads(p_docs):
-            ''' Transform mongo documents into an array of binary vectors '''
-            ads_vector = np.array([lb.transform(ads)[0] for ads in p_docs['adsorbates']])
-            return ads_vector
+        def preprocess_ads(docs):
+            # We package the calculation into a function so that we can parallelize it
+            def _preprocess_ads(doc):  # noqa: E306
+                ads = doc['adsorbates']
+                ads_vector = lb.transform(ads)[0]
+                return ads_vector
+            # Use GASpy multiprocessing to do the calculation
+            ads_vectors = utils.map(_preprocess_ads, docs)
+            return np.array(ads_vectors)
 
         return preprocess_ads
 
 
-    def _neighbors_coordcounts(self, p_docs=None):
+    def _neighbors_coordcounts(self, docs=None):
         '''
         Create a preprocessing function for the coordination counts of the adsorbate's neighebors.
         This is just like `_coordcount`, but will have a vector for each of the neighbors instead
         of one vector for the adsorbate itself.
 
         Input:
-            p_docs  Parsed mongo dictionaries. Default value of `None` yields `self.p_docs`
+            docs    Mongo json dictionaries. Default value of `None` yields `self.docs`
         Output:
-            preprocess_rnnc_count   Function to preprocess parsed mongo docs into
+            preprocess_rnnc_count   Function to preprocess mongo docs into
                                     an array of binary vectors
         '''
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
 
         # Create a label binarizer to convert a single symbol string into a vector of binaries
-        preprocess_coordcount, lb = self._coordcount(p_docs, return_lb=True)
+        preprocess_coordcount, lb = self._coordcount(docs, return_lb=True)
 
-        def preprocess_neighbors_coordcounts(p_docs):
+        def preprocess_neighbors_coordcounts(docs):
             '''
             We do the same thing that we do in the `_coordcount` method, but for
             `neighborcoord` instead.
             '''
-            # Initialize the output
-            neighbors_coordcounts = []
-
             # We'll be doing this action a lot. Let's wrap it.
             def _calc_coordcount(coord):
                 ''' Turn a `coord` string into a list of integers, i.e., coordcount '''
                 return np.sum(lb.transform(coord.split('-')), axis=0)
-
-            # Unpack the data. `ncoords` is a list of neighborcoord values, and
-            # n_symbols is the total number of symbols we'll be considering
-            ncoords = p_docs['neighborcoord']
+            # n_symbols is the total number of symbols we'll be considering. Used for initialization
             n_symbols = len(_calc_coordcount(''))
 
-            #pool = multiprocessing.pool.Pool(16)
-            #neighbors_coordcounts = pool.map(partial(coord_to_neighborcoordcount, n_symbols, lb),
-            #                                 ncoords)
-            #pool.close()
-            neighbors_coordcounts = map(partial(coord_to_neighborcoordcount, n_symbols, lb),
-                                        ncoords)
+            # Package the calculation into a function so that we can parallelize it
+            def _preprocess_neighbors_coordcounts(doc):
+                ncoord = doc['neighborcoord']
+                # Initialize `coordcount_array`, which will be an array of integers
+                # whose rows will correspond to the cumulative coordcounts of each
+                # respective element
+                coordcount_array = np.zeros((n_symbols, n_symbols), dtype=np.int64)
+                # Add the coordcount vector for each neighbor
+                for coord_string in ncoord:
+                    # Unpack the information and then calculate the coordcount for this neighbor
+                    neighbor, coord = coord_string.split(':')
+                    coordcount = _calc_coordcount(coord)
+                    # Find the row within the array that this neighbor should map to
+                    neighbors_index, = np.where(_calc_coordcount(neighbor) == 1)
+                    # Add the coordcount to the array
+                    coordcount_array[neighbors_index, :] += np.array(coordcount)
+                # Flatten the array into a vector so that our regressors can use it,
+                # and then add it to the output
+                coordcount_vector = np.concatenate(coordcount_array, axis=0)
+                return coordcount_vector
+            # Use GASpy multiprocessing to do the calculation
+            neighbors_coordcounts = utils.map(_preprocess_neighbors_coordcounts, docs)
 
-            return neighbors_coordcounts
+            return np.array(neighbors_coordcounts)
 
         return preprocess_neighbors_coordcounts
 
 
     # TODO:  Create this method
-    def _gcn(self, p_docs=None):
+    def _gcn(self, docs=None):
         raise Exception('This method has not been created yet')
 
 
     # TODO:  Create this method
-    def _dband_center(self, p_docs=None):
+    def _dband_center(self, docs=None):
         raise Exception('This method has not been created yet')
 
 
-    def _hash(self, p_docs=None, excluded_fingerprints='default'):
+    def _hash(self, docs=None, excluded_fingerprints='default'):
         '''
         Create a preprocessing function that hashes all of the inputs and then binarizes them.
         This is meant to create a unique identifier for each site, which is useful for testing.
 
         Input:
-            p_docs                  Parsed mongo dictionaries. Default value of `None`
-                                    yields `self.p_docs`
+            docs                    Mongo json dictionaries. Default value of `None`
+                                    yields `self.docs`
             excluded_fingerprints   A list of strings for all of the fingerprints inside of
-                                    `p_docs` that the user does not want to hash. If `None`,
+                                    `docs` that the user does not want to hash. If `None`,
                                     then we set it as an empty list. If 'default', then set
                                     it to ['energy', 'adsorbates'].
         Output:
-            preprocess_hash     Function to turn parsed mongo docs
+            preprocess_hash     Function to turn mongo docs
         '''
         # Manage default arguments
-        if not p_docs:
-            p_docs = copy.deepcopy(self.p_docs)
+        if not docs:
+            docs = copy.deepcopy(self.docs)
         if not excluded_fingerprints:
             excluded_fingerprints = []
         elif excluded_fingerprints == 'default':
-            excluded_fingerprints = ['energy']
+            excluded_fingerprints = ['energy', 'adsorbates']
 
         # Turn the list of excluded fingerprints into an empty dictionary so that we
         # can use the `in` statement later on
         excluded_fingerprints = dict.fromkeys(excluded_fingerprints)
 
-        # Create a function to hash p_docs
-        def __hash(p_docs):
-            ''' Hash everything inside of `p_docs`, excluding the `excluded_fingerprints` '''
-            # Number of data points
-            n_data = len(p_docs.values()[0])
-
-            # Initialize a list of strings. Each of these strings will be concatenated
-            # strings of all of the fingerprints present in `p_docs`
-            strs = [''] * n_data
-
-            # Perform the concatenation, then hash all the entries
-            for fingerprint, values in p_docs.iteritems():
+        # Create a function to hash a doc, then hash all of them
+        def __hash(doc):
+            ''' Hash everything inside of a document, excluding the `excluded_fingerprints` '''
+            _str = ''
+            for fingerprint, value in doc.iteritems():
                 if fingerprint not in excluded_fingerprints:
-                    for i in range(n_data):
-                        strs[i] += str(values[i])
-            hashes = [hash(_str) for _str in strs]
-
-            return hashes
-
-        # Create a label binarizer for all the unique hashes
+                    _str += fingerprint + '=' + str(value) + '; '
+            return hash(_str)
+        hashes = [__hash(doc) for doc in docs]
+        # Now use the hashes to fit a binarizer
         lb = preprocessing.LabelBinarizer()
-        lb.fit(__hash(p_docs))
+        lb.fit(hashes)
 
-        # Lastly, create another function that wraps the binarizer around the hasher
-        def preprocess_hash(p_docs):
-            ''' Call on the `__hash` function, but now binarize its output '''
-            _hashes = __hash(p_docs)
-            bin_hashes = lb.transform(_hashes)
+        # Create another function that hashes documents and then transforms them
+        # with the binarizer we just made
+        def preprocess_hash(docs):
+            hashes = utils.map(__hash, docs)
+            bin_hashes = utils.map(lb.transform, hashes)
             return bin_hashes
 
         return preprocess_hash
 
 
-    def transform(self, p_docs):
+    def transform(self, docs):
         '''
         Turn mongo documents into preprocessed, stacked, and scaled inputs.
 
         Input:
-            p_docs  Parsed mongo documents, i.e., a dictionary of lists of data
+            docs    Mongo json documents, i.e., a dictionary of lists of data
         Output:
-            preprocessed_features   A numpy array. The first axis extends for len(p_docs),
+            preprocessed_features   A numpy array. The first axis extends for len(docs),
                                     and the second axis contains all of the preprocessed,
                                     scaled features.
         '''
-        # Apply all of the preprocessing to the fingerprints, and store the results
-        # in a list, `features`
-        features = []
-        for feature, preprocessor in self.preprocessors.iteritems():
-            features.append(preprocessor(p_docs))
-
-        # Stack the features and turn them into a numpy array
-        preprocessed_features = np.concatenate(tuple(features), axis=1)
-
-        return preprocessed_features
+        # Preprocess, stack, and scale the features
+        features = [preprocess(docs) for preprocess in self.preprocessors.values()]
+        stacked_features = np.concatenate(tuple(features), axis=1)
+        # TODO:  Figure out how to keep scaling without GP losing scaling terribly
+        # scaled_features = self.scaler.transform(stacked_features)
+        # return np.array(scaled_features)
+        return stacked_features
 
 
     # TODO:  Create this method
@@ -422,10 +368,10 @@ class GASpyPreprocessor(object):
         of information.
 
         Input:
-            preprocessed_features   A numpy array. The first axis extends for len(p_docs),
+            preprocessed_features   A numpy array. The first axis extends for len(docs),
                                     and the second axis contains all of the preprocessed,
                                     scaled features.
         Output:
-            p_docs    A mongo-style list of dictionaries
+            docs    A mongo-style list of dictionaries
         '''
         pass

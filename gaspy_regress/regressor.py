@@ -15,7 +15,6 @@ import copy
 import math
 import warnings
 import numpy as np
-import dill as pickle
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
 from plotly.offline import init_notebook_mode, iplot
@@ -24,7 +23,6 @@ import matplotlib
 from matplotlib import pyplot as plt
 from .preprocessor import GASpyPreprocessor
 from gaspy import utils, gasdb
-pickle.settings['recurse'] = True     # required to pickle lambdify functions (for alamopy)
 
 
 class GASpyRegressor(object):
@@ -125,11 +123,7 @@ class GASpyRegressor(object):
             x               A nested dictionary with the following structure:
                             x = {'block': {'split_data_set': np.array(INPUT_DATA)}}
             y               The same as `x`, but for the outputs, not the inputs
-            p_docs          The same as `x`, but the dict values are not np.arrays of data.
-                            Instead, they are dictionaries with structures analogous to the
-                            `p_docs` returned by `gaspy.utils.get_docs`, i.e., it is a dictionary
-                            whose keys are the keys of `fingerprints` and whose values are lists
-                            of the results.
+            docs            The same as `x`, but for the Mongo json documents
             pp              The instance of GASpyPreprocessor that was used to preprocess the
                             data set pulled by FeaturePuller. This is used to preprocess other data
                             to make future predictions.
@@ -146,7 +140,12 @@ class GASpyRegressor(object):
                             from the entire set
             indices_test    The indices that can be used to find the test set
                             from the entire set
+            n_jobs          This is actually set at a default of 1 and is not an argument.
+                            Setting this to a higher value (after instantiation and before
+                            prediction) enables parallel prediction for SKLearn-based models.
+                            You should set this equal to the number of threads you are using.
         '''
+        self.n_jobs = 1
         self.features = features
         self.responses = responses
         self.blocks = blocks
@@ -208,32 +207,32 @@ class GASpyRegressor(object):
         fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
         fingerprints['miller'] = '$processed_data.calculation_info.miller',
 
-        # Pull the data into parsed mongo documents (i.e., a dictionary of lists), `p_docs`
+        # Pull the data into a list of mongo (json) documents
         with gasdb.get_adsorption_client() as client:
-            docs, p_docs = gasdb.get_docs(client, collection, fingerprints,
-                                          adsorbates=None,
-                                          calc_settings=None,
-                                          vasp_settings=vasp_settings,
-                                          energy_min=energy_min,
-                                          energy_max=energy_max,
-                                          f_max=f_max,
-                                          ads_move_max=ads_move_max,
-                                          bare_slab_move_max=bare_slab_move_max,
-                                          slab_move_max=slab_move_max)
-        if not p_docs.values()[0]:
+            docs, _ = gasdb.get_docs(client, collection, fingerprints,
+                                     adsorbates=None,
+                                     calc_settings=None,
+                                     vasp_settings=vasp_settings,
+                                     energy_min=energy_min,
+                                     energy_max=energy_max,
+                                     f_max=f_max,
+                                     ads_move_max=ads_move_max,
+                                     bare_slab_move_max=bare_slab_move_max,
+                                     slab_move_max=slab_move_max)
+        if not docs:
             raise Exception('Failed to find any data. Please check your query settings.')
 
         # Preprocess the features
-        pp = GASpyPreprocessor(p_docs, features)
-        x = pp.transform(p_docs)
+        pp = GASpyPreprocessor(docs, features)
+        x = pp.transform(docs)
         # Pull out, stack (if necessary), and numpy-array-ify the responses.
         # We might do real preprocessing to these one day. But not today.
         if len(responses) == 1:
-            y = np.array(p_docs[responses[0]])
+            y = np.array([doc[responses[0]] for doc in docs])
         elif len(responses) > 1:
             y = []
             for response in responses:
-                y.append(np.array(p_docs[response]))
+                y.append(np.array([doc[response] for doc in docs]))
             y = np.concatenate(tuple(y), axis=1)
 
         # If we're training on everything, then assign the data to the class attributes and move on
@@ -243,22 +242,19 @@ class GASpyRegressor(object):
                                 'all data': x}}
             self.y = {(None,): {'train': y,
                                 'all data': y}}
-            self.p_docs = {(None,): {'train': p_docs,
-                                     'all data': p_docs}}
+            self.docs = {(None,): {'train': docs,
+                                   'all data': docs}}
         # If we're splitting, then start splitting
         else:
             x_train, x_test, y_train, y_test, docs_train, docs_test = \
                 self._stratified_split(n_bins, train_size, random_state, x, y, docs)
-            # We could only do a split on `docs`. But we actually want `p_docs`. Convert here.
-            p_docs_train = utils.docs_to_pdocs(docs_train)
-            p_docs_test = utils.docs_to_pdocs(docs_test)
             # Now store the information in class attributes
             self.x = {(None,): {'test': x_test,
                                 'all data': x}}
             self.y = {(None,): {'test': y_test,
                                 'all data': y}}
-            self.p_docs = {(None,): {'test': p_docs_test,
-                                     'all data': p_docs}}
+            self.docs = {(None,): {'test': docs_test,
+                                   'all data': docs}}
             # Do it all again, but for the development set. Note that we re-calculate
             # `dev_size` because we're splitting from the training set, not the whole set.
             if dev_size:
@@ -266,22 +262,19 @@ class GASpyRegressor(object):
                 x_train, x_dev, y_train, y_dev, docs_train, docs_dev = \
                     self._stratified_split(n_bins, dev_size, random_state,
                                            x_train, y_train, docs_train)
-                p_docs_train = utils.docs_to_pdocs(docs_train)
-                p_docs_dev = utils.docs_to_pdocs(docs_dev)
                 self.x[(None,)]['dev'] = x_dev
                 self.y[(None,)]['dev'] = y_dev
-                self.p_docs[(None,)]['dev'] = p_docs_dev
             self.x[(None,)]['train'] = x_train
             self.y[(None,)]['train'] = y_train
-            self.p_docs[(None,)]['train'] = p_docs_train
+            self.docs[(None,)]['train'] = docs_train
 
+        # TODO:  Finish this K-folding
         # Now do the k-folding on the training set
         if k_folds:
             # Unpack the data we'll be folding
             x = self.x[(None,)]['train']
             y = self.y[(None,)]['train']
-            p_docs = self.p_docs[(None,)]['train']
-            docs = utils.pdocs_to_docs(p_docs)
+            docs = self.docs[(None,)]['train']
 
         if blocks:
             # TODO:  Address this when we start doing co-adsorption.
@@ -290,14 +283,14 @@ class GASpyRegressor(object):
             # while the former is simply the first adsorbate. This really only works
             # because we're only looking at one adsorbate at a time right now.
             if 'adsorbate' in blocks:
-                for dataset in self.p_docs[(None,)]:
-                    self.p_docs[(None,)][dataset]['adsorbate'] = \
-                        [adsorbates[0] for adsorbates in self.p_docs[(None,)][dataset]['adsorbates']]
+                for dataset in self.docs[(None,)]:
+                    for i, doc in enumerate(self.docs[(None,)][dataset]):
+                        self.docs[(None,)][dataset][i]['adsorbate'] = doc['adsorbates'][0]
 
             # Warn the user if they're trying to block by something that they might not
             # be pulling
             for block in blocks:
-                if block not in self.p_docs[(None,)][dataset]:
+                if block not in self.docs[(None,)][dataset][0]:
                     warnings.warn('You are trying to block by %s, but we did not find that fingerprint'
                                   % block, SyntaxWarning)
 
@@ -306,19 +299,38 @@ class GASpyRegressor(object):
             # corresponds to the order of the fingerprints in the `blocks` list. For example,
             # if blocks = ['adsorbate', 'top'], then block_values could be
             # [['O', 'CO'], ['Top', 'Bottom']]. We use block_values to create `block_list`.
-            block_values = []
+            unique_blocks = []
+            docs = self.docs[(None,)]['all data']
             for block in blocks:
-                block_values.append(np.unique(self.p_docs[(None,)]['train'][block]).tolist())
-            self.block_list = [block for block in itertools.product(*block_values)]
+                block_values = [doc[block] for doc in docs]
+                unique_values = np.unique(block_values).tolist()
+                unique_blocks.append(unique_values)
+            self.block_list = [block for block in itertools.product(*unique_blocks)]
+
             # Filter the class attributes for each block, and then add the filtered
             # data to the attributes as sub-dictionaries
             for block in self.block_list:
-                self.x[block] = self._filter(self.x[(None,)], blocks, block)
-                self.y[block] = self._filter(self.y[(None,)], blocks, block)
-                self.p_docs[block] = self._filter(self.p_docs[(None,)], blocks, block)
+                filtered_docs = {}
+                filtered_x = {}
+                filtered_y = {}
+                for dataset, docs in self.docs[(None,)].iteritems():
+                    filtered_docs[dataset] = []
+                    filtered_x[dataset] = []
+                    filtered_y[dataset] = []
+                    for doc, x, y in zip(docs, self.x[(None,)][dataset], self.y[(None,)][dataset]):
+                        doc_block = tuple([doc[b] for b in blocks])
+                        if doc_block == block:
+                            filtered_docs[dataset].append(doc)
+                            filtered_x[dataset].append(x)
+                            filtered_y[dataset].append(y)
+                    filtered_x[dataset] = np.array(filtered_x[dataset])
+                    filtered_y[dataset] = np.array(filtered_y[dataset])
+                self.docs[block] = filtered_docs
+                self.x[block] = filtered_x
+                self.y[block] = filtered_y
 
         # If there is no blocking, then set `block_list` to [(None,)], which will cause this
-        # class' methods to act on the entire dataset pulled by `PullFeatures`.
+        # class' methods to act on the entire dataset
         else:
             self.block_list = [(None,)]
 
@@ -358,55 +370,6 @@ class GASpyRegressor(object):
             raise
 
         return split_data
-
-
-    def _filter(self, data, blocks, block):
-        '''
-        Filter the `data` according to the `block` that it belongs to.
-        Note that the algorithm to create the `fdata` intermediary object is... complicated.
-        I hurt my brain writing it. Feel free to pick it apart to make it easier to read.
-
-        Inputs:
-            data        A dictionary whose keys are 'all data', 'train', and 'test'.
-                        The values are numpy arrays of data that are yielded by `PullFeatures`...
-                        or they are dictionaries of parsed mongo data are also yielded by
-                        `PullFeatures`
-            blocks      A list of the names of the fingerprints that we are blocking on,
-                        e.g., ['adsorbate', 'mpid']
-            block       A tuple of the values of the fingerprints values that we are blocking on,
-                        e.g., ('H', 'mp-126'). The order of the block values must
-                        match the order of block names in the `block_names` list.
-        Output:
-            filtered_data   The subset of `data` whose fingerprint values match those supplied
-                            in `block`
-        '''
-        # Initialize output
-        filtered_data = dict.fromkeys(data)
-        # Find the type of the values of `data` so that we treat it correctly
-        dtype = type(data.values()[0])
-
-        # If `_data` is an np.array, then treat it as such. This probably means
-        # that `_data` is either `x` or `y`
-        if isinstance(np.array([]), dtype):
-            for dataset, _data in data.iteritems():
-                fdata = [datum for i, datum in enumerate(_data)
-                         if all([fp_value == self.p_docs[(None,)][dataset][blocks[j]][i]
-                                 for j, fp_value in enumerate(block)])]
-                # Convert to np.array so that it can be accepted by most regressors
-                filtered_data[dataset] = np.array(fdata)
-
-        # If `_data` is a dict, then we need to loop through each element. This
-        # probably means that `_data` is `p_docs`.
-        elif dtype == dict:
-            for dataset, _data in data.iteritems():
-                filtered_data[dataset] = dict.fromkeys(_data)
-                for p_doc_key, __data in _data.iteritems():
-                    fdata = [datum for i, datum in enumerate(__data)
-                             if all([fp_value == self.p_docs[(None,)][dataset][blocks[j]][i]
-                                     for j, fp_value in enumerate(block)])]
-                    filtered_data[dataset][p_doc_key] = fdata
-
-        return filtered_data
 
 
     def fit_sk(self, regressor, x_dict=None, y_dict=None, blocks=None, model_name=None):
@@ -458,9 +421,14 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(features, block=(None,)):
+        def _predict(feature, block=(None,)):
+            '''
+            Note that we assume that we are passing only one item to this function.
+            We do this because we assume the `self` method will take care of
+            the parallelization of multiple inputs.
+            '''
             model = models[block]
-            predictions = model.predict(features)
+            predictions = model.predict([feature])
             return predictions
 
         # Assign the attributes
@@ -523,9 +491,14 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(features, block=(None,)):
+        def _predict(feature, block=(None,)):
+            '''
+            Note that we assume that we are passing only one item to this function.
+            We do this because we assume the `self` method will take care of
+            the parallelization of multiple inputs.
+            '''
             model = models[block]
-            predictions = model.predict(features)
+            predictions = model.predict([feature])
             return predictions
 
         # Assign the attributes
@@ -568,19 +541,19 @@ class GASpyRegressor(object):
             self.models_inner = copy.deepcopy(self.models)
         except AttributeError:
             raise AttributeError('You tried to fit an outer model without fitting an inner model')
-        # Pull out p_docs (for ease of reading)
-        p_docs = self.p_docs
+        # Pull out docs (for ease of reading)
+        docs = self.docs
 
         # Create the outer preprocessor
         try:
-            pp = GASpyPreprocessor(p_docs[(None,)]['train'], outer_features)
+            pp = GASpyPreprocessor(docs[(None,)]['train'], outer_features)
         except KeyError:
             raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')
-        # Preprocess p_docs again, but this time for the outer regressor
+        # Preprocess docs again, but this time for the outer regressor
         x = copy.deepcopy(self.x_inner)
         for block in x:
             for dataset in x[block]:
-                x[block][dataset] = pp.transform(p_docs[block][dataset])
+                x[block][dataset] = pp.transform(docs[block][dataset])
         # Save the new attributes
         self.features = outer_features
         self.x = x
@@ -593,32 +566,52 @@ class GASpyRegressor(object):
         self._predict_outer = copy.deepcopy(self._predict)
 
         # Create and save the hierarchical model
-        def _predict(inner_features, outer_features, block=(None,)):
-            inner_predictions = self._predict_inner(inner_features, block=block)
-            outer_predictions = self._predict_outer(outer_features, block=block)
-            predictions = inner_predictions + outer_predictions
-            return predictions
+        def _predict(features, block=(None,)):
+            '''
+            Note that we assume that we are passing only one item to this function.
+            We do this because we assume the `self` method will take care of
+            the parallelization of multiple inputs.
+            '''
+            inner_feature, outer_feature = features
+            inner_prediction = self._predict_inner(inner_feature, block=block)
+            outer_prediction = self._predict_outer(outer_feature, block=block)
+            prediction = inner_prediction + outer_prediction
+            return prediction
         self._predict = _predict
 
 
-    def predict(self, p_docs, block=(None,)):
+    def predict(self, docs, block=(None,), nodes=1):
         '''
         This method is a wrapper for whatever `_predict` function that we created with a `fit_*`
         method. The `_predict` function accepts preprocessed inputs. This method does
         the preprocessing for the user and passes it to _predict.
+
+        Note that we do predictions in parallel. We also pass generators as argument inputs,
+        which is the Pythonic "just in time" way to do it. Otherwise we might run into memory
+        issues with the huge feature sets we're passing around.
+
+        Inputs:
+            docs    A list of Mongo-style json (dict) objects. Each item in the list will be
+                    used to make one prediction (apiece).
+            block   A tuple indicating the block of the model you want to use. Defaults to
+                    (None,)
+            nodes   A positive integer indicating how many nodes you have available to use
+                    for multiprocessing.
+        Outputs:
+            predictions     A list of the predictions of each `doc` within `docs`
         '''
         # First, assume that the model is hierarchical.
         try:
-            inner_features = self.pp_inner.transform(p_docs)
-            outer_features = self.pp.transform(p_docs)
-            predictions = self._predict(inner_features, outer_features, block=block)
-
+            inner_features = self.pp_inner.transform(docs)
+            outer_features = self.pp.transform(docs)
+            features = zip(inner_features, outer_features)
         # If not, then assume it's a single-layer model.
         except AttributeError:
-            features = self.pp.transform(p_docs)
-            predictions = self._predict(features, block)
+            features = self.pp.transform(docs)
 
-        return predictions
+        # Make the predictions
+        predictions = utils.map_method(self, '_predict', features, block=block)
+        return np.array(predictions)
 
 
     def parity_plot(self, split=False, jupyter=True, plotter='plotly',

@@ -86,10 +86,10 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
                                              ads_move_max=ads_move_max,
                                              bare_slab_move_max=bare_slab_move_max,
                                              slab_move_max=slab_move_max)
-        ads_x = np.array(ads_pdocs[descriptor])
-    cat_docs, cat_pdocs = gasdb.unsimulated_catalog(adsorbates=[adsorbate],
-                                                    vasp_settings=vasp_settings,
-                                                    fingerprints=defaults.fingerprints())
+        ads_x = np.array(ads_pdocs[descriptor]).reshape(-1, 1)
+    cat_docs, _ = gasdb.unsimulated_catalog(adsorbates=[adsorbate],
+                                            vasp_settings=vasp_settings,
+                                            fingerprints=defaults.fingerprints())
 
     # Catalog documents don't have any information about adsorbates. But if our model
     # requires information about adsorbates, then we probably need to put it in.
@@ -99,21 +99,19 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     except AttributeError:
         features = regressor.features
     if 'ads' in features:
-        cat_pdocs['adsorbates'] = [[adsorbate]] * len(cat_docs)
+        for i, doc in enumerate(cat_docs):
+            doc['adsorbate'] = doc['adsorbates'][0]
+            cat_docs[i] = doc
     # Create the regressor's prediction
-    cat_x = regressor.predict(cat_pdocs, regressor_block)
+    cat_x = regressor.predict(cat_docs, regressor_block)
 
     # Filter the data over each fingerprint block, as per the `_minimize_over` function.
     if fp_blocks:
         cat_docs, cat_x, ads_docs, ads_x = _minimize_over(cat_docs, cat_x, ads_docs, ads_x, fp_blocks)
 
     # We're also going to want to find our regressor's estimate for items that we
-    # have already done simulations on (for parity plots and whatnot). We do that by
-    # re-creating the `ads_pdocs`, but now it's been filtered with `_minimize_over`.
-    # We then feed that to the regressor to make the estimation.
-    for key in ads_pdocs.keys():
-        ads_pdocs[key] = [doc[key] if key in doc else None for doc in ads_docs]
-    ads_x_est = regressor.predict(ads_pdocs, regressor_block)
+    # have already done simulations on (for parity plots and whatnot).
+    ads_x_est = regressor.predict(ads_docs, regressor_block)
 
     # Transform the volcano x-axis into the y-axis
     cat_y = volcano(cat_x)
@@ -231,7 +229,6 @@ def _minimize_over(cat_docs, cat_values, sim_docs, sim_values, fp_blocks):
     '''
     In some cases, we do not want to plot all of our data. We would rather
     plot only data that represent minima within certain blocks or fingerprints.
-    For example:  If we are looking at adsorption energies, sometimes we only
     want to find the minimum adsorption energies for a given surface for each
     bulk material we are looking at. This function performs this filtering for us.
 

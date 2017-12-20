@@ -13,7 +13,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 import gspread
 from gaspy import utils
 from . import predict
-pickle.settings['recurse'] = True     # required to pickle lambdify functions (for alamopy)
 
 
 def dump_model(regressor, fname=None):

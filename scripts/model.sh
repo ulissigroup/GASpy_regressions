@@ -1,8 +1,7 @@
 #!/bin/sh -l
 
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --time=01:30:00
+#SBATCH --time=03:00:00
 #SBATCH --partition=regular
 #SBATCH --job-name=model
 #SBATCH --output=model-%j.out

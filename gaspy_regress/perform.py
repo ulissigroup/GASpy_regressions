@@ -18,7 +18,6 @@ def modeling():
     VASP_SETTINGS = vasp_settings_to_str({'gga': 'RP',
                                           'pp_version': '5.4',
                                           'encut': 350})
-
     model_name = 'GP_around_TPOT'
     features = ['coordcount']
     outer_features = ['neighbors_coordcounts']
