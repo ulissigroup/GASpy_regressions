@@ -86,7 +86,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
                                              ads_move_max=ads_move_max,
                                              bare_slab_move_max=bare_slab_move_max,
                                              slab_move_max=slab_move_max)
-        ads_x = np.array(ads_pdocs[descriptor]).reshape(-1, 1)
+        ads_x = np.array(ads_pdocs[descriptor])
     cat_docs, _ = gasdb.unsimulated_catalog(adsorbates=[adsorbate],
                                             vasp_settings=vasp_settings,
                                             fingerprints=defaults.fingerprints())

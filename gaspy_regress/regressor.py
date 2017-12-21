@@ -611,7 +611,7 @@ class GASpyRegressor(object):
 
         # Make the predictions
         predictions = utils.map_method(self, '_predict', features, block=block)
-        return np.array(predictions)
+        return np.array(predictions).flatten()
 
 
     def parity_plot(self, split=False, jupyter=True, plotter='plotly',
