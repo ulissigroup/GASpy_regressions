@@ -140,7 +140,7 @@ class GASpyPreprocessor(object):
                 coordcount = np.sum(lb.transform(coord.split('-')), axis=0)
                 return coordcount
             # Use GASpy multiprocessing to do the calculation
-            coordcounts = utils.map(_preprocess_coordcount, docs)
+            coordcounts = utils.multimap(_preprocess_coordcount, docs)
             return np.array(coordcounts)
 
         if not return_lb:
@@ -181,7 +181,7 @@ class GASpyPreprocessor(object):
                 rnnc_count = nnc_count - coordcount
                 return list(rnnc_count)
             # Use GASpy multiprocessing to do the calculation
-            rnnc_counts = utils.map(_preprocess_rnnc_count, docs)
+            rnnc_counts = utils.multimap(_preprocess_rnnc_count, docs)
             return np.array(rnnc_counts)
 
         return preprocess_rnnc_count
@@ -217,7 +217,7 @@ class GASpyPreprocessor(object):
                 ads_vector = lb.transform(ads)[0]
                 return ads_vector
             # Use GASpy multiprocessing to do the calculation
-            ads_vectors = utils.map(_preprocess_ads, docs)
+            ads_vectors = utils.multimap(_preprocess_ads, docs)
             return np.array(ads_vectors)
 
         return preprocess_ads
@@ -274,7 +274,7 @@ class GASpyPreprocessor(object):
                 coordcount_vector = np.concatenate(coordcount_array, axis=0)
                 return coordcount_vector
             # Use GASpy multiprocessing to do the calculation
-            neighbors_coordcounts = utils.map(_preprocess_neighbors_coordcounts, docs)
+            neighbors_coordcounts = utils.multimap(_preprocess_neighbors_coordcounts, docs)
 
             return np.array(neighbors_coordcounts)
 
@@ -334,8 +334,8 @@ class GASpyPreprocessor(object):
         # Create another function that hashes documents and then transforms them
         # with the binarizer we just made
         def preprocess_hash(docs):
-            hashes = utils.map(__hash, docs)
-            bin_hashes = utils.map(lb.transform, hashes)
+            hashes = utils.multimap(__hash, docs)
+            bin_hashes = utils.multimap(lb.transform, hashes)
             return bin_hashes
 
         return preprocess_hash
