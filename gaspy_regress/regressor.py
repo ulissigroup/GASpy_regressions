@@ -689,7 +689,7 @@ class GASpyRegressor(object):
             for dataset in datasets:
                 # Unpack data from the class attributes
                 y = self.y[block][dataset]
-                p_docs = self.p_docs[block][dataset]
+                docs = self.docs[block][dataset]
                 errors = self.errors[block][dataset]
                 # Calculate the model's prediction
                 y_hat = y - errors
@@ -700,10 +700,10 @@ class GASpyRegressor(object):
                 # Plot it
                 if plotter == 'plotly':
                     # If we're using plotly, then add hovertext, `text`
-                    text = ['']*len(p_docs.values()[0])
-                    for fingerprint, values in p_docs.iteritems():
-                        for i, value in enumerate(values):
-                            text[i] += '<br>' + str(fingerprint) + ':  ' + str(value)
+                    text = ['']*len(docs)
+                    for i, doc in enumerate(docs):
+                        for key, value in doc.iteritems():
+                            text[i] += '<br>' + str(key) + ':  ' + str(value)
                     traces.append(go.Scatter(x=y, y=y_hat,
                                              name=str((block, dataset)),
                                              mode='markers',
