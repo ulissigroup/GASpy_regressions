@@ -616,7 +616,7 @@ class GASpyRegressor(object):
 
     def parity_plot(self, split=False, jupyter=True, plotter='plotly',
                     xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
-                    fname='parity.png', s=None, font=None):
+                    fname='parity.pdf', s=None, font=None):
         '''
         Create a parity plot of the model that's been fit.
 
