@@ -10,7 +10,7 @@ import pdb  # noqa: F401
 import pickle
 import numpy as np
 import pandas as pd
-from gaspy import gasdb, defaults   # noqa: E402
+from gaspy import utils, gasdb, defaults   # noqa: E402
 
 
 def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
@@ -76,20 +76,21 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     # by specifying a lot of filters.
     with gasdb.get_adsorption_client() as ads_client:
         fingerprints = defaults.fingerprints(simulated=True)
-        ads_docs, ads_pdocs = gasdb.get_docs(ads_client, 'adsorption',
-                                             adsorbates=[adsorbate],
-                                             fingerprints=fingerprints,
-                                             vasp_settings=vasp_settings,
-                                             energy_min=energy_min,
-                                             energy_max=energy_max,
-                                             f_max=f_max,
-                                             ads_move_max=ads_move_max,
-                                             bare_slab_move_max=bare_slab_move_max,
-                                             slab_move_max=slab_move_max)
+        ads_docs = gasdb.get_docs(ads_client, 'adsorption',
+                                  adsorbates=[adsorbate],
+                                  fingerprints=fingerprints,
+                                  vasp_settings=vasp_settings,
+                                  energy_min=energy_min,
+                                  energy_max=energy_max,
+                                  f_max=f_max,
+                                  ads_move_max=ads_move_max,
+                                  bare_slab_move_max=bare_slab_move_max,
+                                  slab_move_max=slab_move_max)
+        ads_pdocs = utils.docs_to_pdocs(ads_docs)
         ads_x = np.array(ads_pdocs[descriptor])
-    cat_docs, _ = gasdb.unsimulated_catalog(adsorbates=[adsorbate],
-                                            vasp_settings=vasp_settings,
-                                            fingerprints=defaults.fingerprints())
+    cat_docs = gasdb.unsimulated_catalog(adsorbates=[adsorbate],
+                                         vasp_settings=vasp_settings,
+                                         fingerprints=defaults.fingerprints())
 
     # Catalog documents don't have any information about adsorbates. But if our model
     # requires information about adsorbates, then we probably need to put it in.
@@ -104,6 +105,10 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
             cat_docs[i] = doc
     # Create the regressor's prediction
     cat_x = regressor.predict(cat_docs, regressor_block)
+
+    # print('Regressor prediction finished, starting minimize_over!')
+    # with open('minimize_over_args.pkl', 'w') as f:
+    #     pickle.dump([cat_docs, cat_x, ads_docs, ads_x, fp_blocks], f)
 
     # Filter the data over each fingerprint block, as per the `_minimize_over` function.
     if fp_blocks:

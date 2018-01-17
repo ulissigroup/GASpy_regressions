@@ -209,16 +209,16 @@ class GASpyRegressor(object):
 
         # Pull the data into a list of mongo (json) documents
         with gasdb.get_adsorption_client() as client:
-            docs, _ = gasdb.get_docs(client, collection, fingerprints,
-                                     adsorbates=None,
-                                     calc_settings=None,
-                                     vasp_settings=vasp_settings,
-                                     energy_min=energy_min,
-                                     energy_max=energy_max,
-                                     f_max=f_max,
-                                     ads_move_max=ads_move_max,
-                                     bare_slab_move_max=bare_slab_move_max,
-                                     slab_move_max=slab_move_max)
+            docs = gasdb.get_docs(client, collection, fingerprints,
+                                  adsorbates=None,
+                                  calc_settings=None,
+                                  vasp_settings=vasp_settings,
+                                  energy_min=energy_min,
+                                  energy_max=energy_max,
+                                  f_max=f_max,
+                                  ads_move_max=ads_move_max,
+                                  bare_slab_move_max=bare_slab_move_max,
+                                  slab_move_max=slab_move_max)
         if not docs:
             raise Exception('Failed to find any data. Please check your query settings.')
 
