@@ -2,12 +2,13 @@
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=32
-#SBATCH --time=06:00:00
+#SBATCH --time=4:00:00
 #SBATCH --partition=regular
 #SBATCH --job-name=predict
 #SBATCH --output=predict-%j.out
 #SBATCH --error=predict-%j.error
 #SBATCH --constraint=haswell
+#SBATCH --qos=premium
 
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1

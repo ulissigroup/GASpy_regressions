@@ -8,7 +8,7 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 from sklearn.gaussian_process import GaussianProcessRegressor
 from tpot import TPOTRegressor
-import gaspy_regress.io
+import gaspy_regress.gio
 import gaspy_regress.predict
 from gaspy_regress.regressor import GASpyRegressor
 from gaspy.utils import vasp_settings_to_str, read_rc
@@ -34,7 +34,7 @@ def modeling():
                        fingerprints=fingerprints, train_size=1)
     H.fit_tpot(tpot, model_name=model_name)
     H.fit_hierarchical(gp, 'fit_sk', outer_features, model_name=model_name)
-    gaspy_regress.io.dump_model(H)
+    gaspy_regress.gio.dump_model(H)
 
 
 def prediction():
@@ -43,17 +43,17 @@ def prediction():
     outer_features = ['neighbors_coordcounts']
     responses = ['energy']
     blocks = ['adsorbate']
-    H = gaspy_regress.io.load_model(model_name, features+outer_features, responses, blocks)
+    H = gaspy_regress.gio.load_model(model_name, features+outer_features, responses, blocks)
     excel_file_path = read_rc()['gaspy_path'] + '/GASpy_regressions/volcanos_parsed.xlsx'
     regressor_block = ('CO',)
     adsorbate = 'CO'
     system = 'CO2RR'
     scale = 'log'
     co2_data = gaspy_regress.predict.volcano(H, regressor_block, system, excel_file_path, scale, adsorbate)
-    gaspy_regress.io.dump_predictions(co2_data, regressor=H, system=system)
+    gaspy_regress.gio.dump_predictions(co2_data, regressor=H, system=system)
     regressor_block = ('H',)
     adsorbate = 'H'
     system = 'HER'
     scale = 'log'
     her_data = gaspy_regress.predict.volcano(H, regressor_block, system, excel_file_path, scale, adsorbate)
-    gaspy_regress.io.dump_predictions(her_data, regressor=H, system=system)
+    gaspy_regress.gio.dump_predictions(her_data, regressor=H, system=system)

@@ -7,6 +7,7 @@
 #SBATCH --output=model-%j.out
 #SBATCH --error=model-%j.error
 #SBATCH --constraint=haswell
+#SBATCH --qos=premium
 
 # Create and save a surrogate model
 python -c "from gaspy_regress.perform import modeling; modeling()"

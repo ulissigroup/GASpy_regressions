@@ -421,14 +421,19 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(feature, block=(None,)):
+        def _predict(docs, block=(None,), layer='outer'):
             '''
             Note that we assume that we are passing only one item to this function.
             We do this because we assume the `self` method will take care of
             the parallelization of multiple inputs.
             '''
+            # Make sure we use the correct preprocessor
+            if layer == 'outer':
+                features = self.pp.transform(docs)
+            elif layer == 'inner':
+                features = self.pp_inner.transform(docs)
             model = models[block]
-            predictions = model.predict([feature])
+            predictions = model.predict(features)
             return predictions
 
         # Assign the attributes
@@ -491,14 +496,19 @@ class GASpyRegressor(object):
                 errors[block][dataset] = y - y_hat
 
         # Create the model
-        def _predict(feature, block=(None,)):
+        def _predict(docs, block=(None,), layer='outer'):
             '''
             Note that we assume that we are passing only one item to this function.
             We do this because we assume the `self` method will take care of
             the parallelization of multiple inputs.
             '''
+            # Make sure we use the correct preprocessor
+            if layer == 'outer':
+                features = self.pp.transform(docs)
+            elif layer == 'inner':
+                features = self.pp_inner.transform(docs)
             model = models[block]
-            predictions = model.predict([feature])
+            predictions = model.predict(features)
             return predictions
 
         # Assign the attributes
@@ -566,21 +576,20 @@ class GASpyRegressor(object):
         self._predict_outer = copy.deepcopy(self._predict)
 
         # Create and save the hierarchical model
-        def _predict(features, block=(None,)):
+        def _predict(docs, block=(None,)):
             '''
             Note that we assume that we are passing only one item to this function.
             We do this because we assume the `self` method will take care of
             the parallelization of multiple inputs.
             '''
-            inner_feature, outer_feature = features
-            inner_prediction = self._predict_inner(inner_feature, block=block)
-            outer_prediction = self._predict_outer(outer_feature, block=block)
+            inner_prediction = self._predict_inner(docs, block=block, layer='inner')
+            outer_prediction = self._predict_outer(docs, block=block, layer='outer')
             prediction = inner_prediction + outer_prediction
             return prediction
         self._predict = _predict
 
 
-    def predict(self, docs, block=(None,), nodes=1):
+    def predict(self, docs, block=(None,), n_chunks=100):
         '''
         This method is a wrapper for whatever `_predict` function that we created with a `fit_*`
         method. The `_predict` function accepts preprocessed inputs. This method does
@@ -591,27 +600,26 @@ class GASpyRegressor(object):
         issues with the huge feature sets we're passing around.
 
         Inputs:
-            docs    A list of Mongo-style json (dict) objects. Each item in the list will be
-                    used to make one prediction (apiece).
-            block   A tuple indicating the block of the model you want to use. Defaults to
-                    (None,)
-            nodes   A positive integer indicating how many nodes you have available to use
-                    for multiprocessing.
+            docs        A list of Mongo-style json (dict) objects. Each item in the list will be
+                        used to make one prediction (apiece).
+            block       A tuple indicating the block of the model you want to use. Defaults to
+                        (None,)
+            n_chunks    We use multiprocessing to do predictions. `chunks` dictates how many
+                        predictions a child process should do before clearing its memory cache.
         Outputs:
             predictions     A list of the predictions of each `doc` within `docs`
         '''
-        # First, assume that the model is hierarchical.
-        try:
-            inner_features = self.pp_inner.transform(docs)
-            outer_features = self.pp.transform(docs)
-            features = zip(inner_features, outer_features)
-        # If not, then assume it's a single-layer model.
-        except AttributeError:
-            features = self.pp.transform(docs)
+        # Chunk the list into bits
+        def chunks(l, n):
+            ''' Yield successive n-sized chunks from l. '''
+            for i in xrange(0, len(l), n):
+                yield l[i:i+n]
+        chunked_docs = list(chunks(docs, n_chunks))
 
         # Make the predictions
-        predictions = utils.map_method(self, '_predict', features, block=block)
-        return np.array(predictions).flatten()
+        print('Making predictions...')
+        predictions = utils.map_method(self, '_predict', chunked_docs, block=block)
+        return np.concatenate(predictions, axis=0).flatten()
 
 
     def parity_plot(self, split=False, jupyter=True, plotter='plotly',

@@ -11,7 +11,7 @@ import copy
 from collections import OrderedDict
 import numpy as np
 from sklearn import preprocessing
-from gaspy import utils
+# from gaspy import utils
 
 
 class GASpyPreprocessor(object):
@@ -134,13 +134,13 @@ class GASpyPreprocessor(object):
             into [[1 0 0 0 0], [0 1 0 0 0], [0 1 0 0 0]]. We then use np.sum
             to sum each list into a coordcount, [1 2 0 0 0].
             '''
-            # Package the calculation into a function so that we can parallelize it
+            # Package the calculation into a function so that we can possibly parallelize it
             def _preprocess_coordcount(doc):  # noqa: E306
                 coord = doc['coordination']
                 coordcount = np.sum(lb.transform(coord.split('-')), axis=0)
                 return coordcount
-            # Use GASpy multiprocessing to do the calculation
-            coordcounts = utils.multimap(_preprocess_coordcount, docs)
+            # coordcounts = map(_preprocess_coordcount, docs)
+            coordcounts = [_preprocess_coordcount(doc) for doc in docs]
             return np.array(coordcounts)
 
         if not return_lb:
@@ -171,7 +171,7 @@ class GASpyPreprocessor(object):
             We do the same thing that we do in the `_coordcount` method, but for
             nextnearestcoordination instead. And then we substract out `coordcount`.
             '''
-            # Package the calculation into a function so that we can parallelize it
+            # Package the calculation into a function so that we can possibly parallelize it
             def _preprocess_rnnc_count(doc):  # noqa: E306
                 ''' Yes, this is hacky. Please don't judge me. '''
                 coord = doc['coordination']
@@ -180,8 +180,8 @@ class GASpyPreprocessor(object):
                 coordcount = preprocess_coordcount([{'coordination': coord}])
                 rnnc_count = nnc_count - coordcount
                 return list(rnnc_count)
-            # Use GASpy multiprocessing to do the calculation
-            rnnc_counts = utils.multimap(_preprocess_rnnc_count, docs)
+            # rnnc_counts = map(_preprocess_rnnc_count, docs)
+            rnnc_counts = [_preprocess_rnnc_count(doc) for doc in docs]
             return np.array(rnnc_counts)
 
         return preprocess_rnnc_count
@@ -211,13 +211,13 @@ class GASpyPreprocessor(object):
 
         # Create the preprocessing function
         def preprocess_ads(docs):
-            # We package the calculation into a function so that we can parallelize it
+            # Package the calculation into a function so that we can possibly parallelize it
             def _preprocess_ads(doc):  # noqa: E306
                 ads = doc['adsorbates']
                 ads_vector = lb.transform(ads)[0]
                 return ads_vector
-            # Use GASpy multiprocessing to do the calculation
-            ads_vectors = utils.multimap(_preprocess_ads, docs)
+            # ads_vectors = map(_preprocess_ads, docs)
+            ads_vectors = [_preprocess_ads(doc) for doc in docs]
             return np.array(ads_vectors)
 
         return preprocess_ads
@@ -253,7 +253,7 @@ class GASpyPreprocessor(object):
             # n_symbols is the total number of symbols we'll be considering. Used for initialization
             n_symbols = len(_calc_coordcount(''))
 
-            # Package the calculation into a function so that we can parallelize it
+            # Package the calculation into a function so that we can possibly parallelize it
             def _preprocess_neighbors_coordcounts(doc):
                 ncoord = doc['neighborcoord']
                 # Initialize `coordcount_array`, which will be an array of integers
@@ -273,8 +273,8 @@ class GASpyPreprocessor(object):
                 # and then add it to the output
                 coordcount_vector = np.concatenate(coordcount_array, axis=0)
                 return coordcount_vector
-            # Use GASpy multiprocessing to do the calculation
-            neighbors_coordcounts = utils.multimap(_preprocess_neighbors_coordcounts, docs)
+            # neighbors_coordcounts = map(_preprocess_neighbors_coordcounts, docs)
+            neighbors_coordcounts = [_preprocess_neighbors_coordcounts(doc) for doc in docs]
 
             return np.array(neighbors_coordcounts)
 
@@ -334,8 +334,10 @@ class GASpyPreprocessor(object):
         # Create another function that hashes documents and then transforms them
         # with the binarizer we just made
         def preprocess_hash(docs):
-            hashes = utils.multimap(__hash, docs)
-            bin_hashes = utils.multimap(lb.transform, hashes)
+            # hashes = map(__hash, docs)
+            # bin_hashes = map(lb.transform, hashes)
+            hashes = [__hash(doc) for doc in docs]
+            bin_hashes = [lb.transform(_hash) for _hash in hashes]
             return bin_hashes
 
         return preprocess_hash

@@ -6,6 +6,8 @@ GASpy and the the surrogate model estimations created by GASpy_regressions.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+import time
+
 import pdb  # noqa: F401
 import pickle
 import numpy as np
@@ -103,28 +105,40 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         for i, doc in enumerate(cat_docs):
             doc['adsorbate'] = doc['adsorbates'][0]
             cat_docs[i] = doc
+
     # Create the regressor's prediction
+    print('Starting catalog prediction...')
     cat_x = regressor.predict(cat_docs, regressor_block)
 
     # print('Regressor prediction finished, starting minimize_over!')
-    # with open('minimize_over_args.pkl', 'w') as f:
-    #     pickle.dump([cat_docs, cat_x, ads_docs, ads_x, fp_blocks], f)
+    with open('minimize_over_args.pkl', 'w') as f:
+        pickle.dump([cat_docs, cat_x, ads_docs, ads_x, fp_blocks], f)
 
     # Filter the data over each fingerprint block, as per the `_minimize_over` function.
     if fp_blocks:
+        print('Starting minimize_over...')
+        tic = time.time()
         cat_docs, cat_x, ads_docs, ads_x = _minimize_over(cat_docs, cat_x, ads_docs, ads_x, fp_blocks)
+        toc = time.time()
+        print('It took %i seconds to minimize_over' % (toc-tic))
 
     # We're also going to want to find our regressor's estimate for items that we
     # have already done simulations on (for parity plots and whatnot).
+    print('Starting subset prediction...')
     ads_x_est = regressor.predict(ads_docs, regressor_block)
 
     # Transform the volcano x-axis into the y-axis
-    cat_y = volcano(cat_x)
-    ads_y = volcano(ads_x)
-    ads_y_est = volcano(ads_x_est)
+    print('Starting triple volcano-ing...')
+    tic = time.time()
+    cat_y = np.array(utils.multimap(volcano, cat_x)).flatten()
+    ads_y = np.array(utils.multimap(volcano, ads_x)).flatten()
+    ads_y_est = np.array(utils.multimap(volcano, ads_x_est)).flatten()
+    toc = time.time()
 
     # We also save the uncertainties of each of these values [eV].
     # Uncertainties are affixed with `u`.
+    print('Starting data shuffling...')
+    tic = time.time()
     sim_u = 0.1  # simulation uncertainty
     model_u = regressor.rmses[regressor_block]['train']  # model uncertainty
     est_u = np.sqrt(sim_u**2 + model_u**2)  # total uncertainty of surrogate model
@@ -142,6 +156,8 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     # Zip up all of the information about unsimulated, catalog systems
     unsim_data = zip(cat_docs,
                      zip(zip(cat_x, cat_x_u), zip(cat_y, cat_y_u)))
+    toc = time.time()
+    print('Took %i seconds to shuffle' % (toc-tic))
 
     return sim_data, unsim_data
 

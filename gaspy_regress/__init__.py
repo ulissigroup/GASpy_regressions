@@ -8,7 +8,7 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 
-# from . import io
+# from . import gio
 # from . import plot
 # from . import preprocessor
 # from . import regressor
