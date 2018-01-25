@@ -2,7 +2,7 @@
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=32
-#SBATCH --time=4:00:00
+#SBATCH --time=04:00:00
 #SBATCH --partition=regular
 #SBATCH --job-name=predict
 #SBATCH --output=predict-%j.out
