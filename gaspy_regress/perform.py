@@ -49,11 +49,11 @@ def prediction():
     adsorbate = 'CO'
     system = 'CO2RR'
     scale = 'log'
-    co2_data = gaspy_regress.predict.volcano(H, regressor_block, system, excel_file_path, scale, adsorbate)
+    co2_data = gaspy_regress.predict.volcano(H, regressor_block, system, excel_file_path, scale, adsorbate, doc_chunk_size=20)
     gaspy_regress.gio.dump_predictions(co2_data, regressor=H, system=system)
     regressor_block = ('H',)
     adsorbate = 'H'
     system = 'HER'
     scale = 'log'
-    her_data = gaspy_regress.predict.volcano(H, regressor_block, system, excel_file_path, scale, adsorbate)
+    her_data = gaspy_regress.predict.volcano(H, regressor_block, system, excel_file_path, scale, adsorbate, doc_chunk_size=20)
     gaspy_regress.gio.dump_predictions(her_data, regressor=H, system=system)

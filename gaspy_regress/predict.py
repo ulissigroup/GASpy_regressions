@@ -16,7 +16,7 @@ from gaspy import utils, gasdb, defaults   # noqa: E402
 
 
 def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
-            adsorbate, fp_blocks='default', descriptor='energy',
+            adsorbate, fp_blocks='default', descriptor='energy', doc_chunk_size=100,
             vasp_settings=None, energy_min=-4, energy_max=4, f_max=0.5,
             ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5):
     '''
@@ -47,6 +47,9 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
                             block at all, then you may set it to `None`
         descriptor          A string indicating the descriptor you are using to
                             create the volcano.
+        doc_chunk_size      We do multiprocessed prediction. This integer argument decides
+                            how many documents a child process should process at a time. Bigger
+                            chunks yield faster runs, but are more prone to memory issues.
         All of the other inputs are filter settings for the data that we want
         to pull from the database of results.
     Outputs:
@@ -108,7 +111,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
 
     # Create the regressor's prediction
     print('Starting catalog prediction...')
-    cat_x = regressor.predict(cat_docs, regressor_block)
+    cat_x = regressor.predict(cat_docs, block=regressor_block, doc_chunk_size=doc_chunk_size)
 
     # Filter the data over each fingerprint block, as per the `_minimize_over` function.
     if fp_blocks:
@@ -121,7 +124,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     # We're also going to want to find our regressor's estimate for items that we
     # have already done simulations on (for parity plots and whatnot).
     print('Starting subset prediction...')
-    ads_x_est = regressor.predict(ads_docs, regressor_block)
+    ads_x_est = regressor.predict(ads_docs, block=regressor_block, doc_chunk_size=doc_chunk_size)
 
     # Transform the volcano x-axis into the y-axis
     print('Starting triple volcano-ing...')

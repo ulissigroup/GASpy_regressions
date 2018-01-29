@@ -589,7 +589,7 @@ class GASpyRegressor(object):
         self._predict = _predict
 
 
-    def predict(self, docs, block=(None,), n_chunks=100):
+    def predict(self, docs, block=(None,), processes=32, doc_chunk_size=100):
         '''
         This method is a wrapper for whatever `_predict` function that we created with a `fit_*`
         method. The `_predict` function accepts preprocessed inputs. This method does
@@ -600,25 +600,28 @@ class GASpyRegressor(object):
         issues with the huge feature sets we're passing around.
 
         Inputs:
-            docs        A list of Mongo-style json (dict) objects. Each item in the list will be
-                        used to make one prediction (apiece).
-            block       A tuple indicating the block of the model you want to use. Defaults to
-                        (None,)
-            n_chunks    We use multiprocessing to do predictions. `chunks` dictates how many
-                        predictions a child process should do before clearing its memory cache.
+            docs            A list of Mongo-style json (dict) objects. Each item in the
+                            list will be used to make one prediction (apiece).
+            block           A tuple indicating the block of the model you want to use.
+                            Defaults to (None,)
+            processes       An integer for how many processors/threads you want to use
+                            when doing predictions.
+            doc_chunk_size  We use multiprocessing to do predictions. `chunks` dictates how many
+                            predictions a child process should do before clearing its memory cache.
         Outputs:
             predictions     A list of the predictions of each `doc` within `docs`
         '''
         # Chunk the list into bits
-        def chunks(l, n):
+        def chunks(docs, doc_chunk_size):
             ''' Yield successive n-sized chunks from l. '''
-            for i in xrange(0, len(l), n):
-                yield l[i:i+n]
-        chunked_docs = list(chunks(docs, n_chunks))
+            for i in xrange(0, len(docs), doc_chunk_size):
+                yield docs[i:i+doc_chunk_size]
+        chunked_docs = list(chunks(docs, doc_chunk_size))
 
         # Make the predictions
         print('Making predictions...')
-        predictions = utils.map_method(self, '_predict', chunked_docs, block=block)
+        predictions = utils.map_method(self, '_predict', chunked_docs, block=block,
+                                       processes=processes)
         return np.concatenate(predictions, axis=0).flatten()
 
 
