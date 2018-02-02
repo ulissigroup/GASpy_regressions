@@ -10,13 +10,16 @@ import time
 
 import pdb  # noqa: F401
 import pickle
+import json
 import numpy as np
 import pandas as pd
+import tqdm
 from gaspy import utils, gasdb, defaults   # noqa: E402
 
 
 def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
-            adsorbate, fp_blocks='default', descriptor='energy', doc_chunk_size=100,
+            adsorbate, fp_blocks='default', descriptor='energy',
+            processes=32, doc_chunk_size=1000, save_all_estimates=False,
             vasp_settings=None, energy_min=-4, energy_max=4, f_max=0.5,
             ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5):
     '''
@@ -47,9 +50,12 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
                             block at all, then you may set it to `None`
         descriptor          A string indicating the descriptor you are using to
                             create the volcano.
-        doc_chunk_size      We do multiprocessed prediction. This integer argument decides
-                            how many documents a child process should process at a time. Bigger
-                            chunks yield faster runs, but are more prone to memory issues.
+        processes          We do multiprocessing. This decides how many processes we use.
+        doc_chunk_size      This integer argument decides how many documents a child process
+                            should process at a time when doing ML estimations. Bigger chunks
+                            yield faster runs, but are more prone to memory issues.
+        save_all_estimates  A boolean indicating whether or not you want to save all of
+                            the estimates we created with the regressor's `predict` method.
         All of the other inputs are filter settings for the data that we want
         to pull from the database of results.
     Outputs:
@@ -72,7 +78,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         fp_blocks = ['mpid', 'miller', 'top']
 
     # Load the literature volcano data
-    volcano, x_expt, y_expt, label_expt = \
+    volcano, dE_expt, y_expt, label_expt = \
         _pull_literature_volcano(excel_file_path, sheetname, scale=scale)
 
     # Define the fingerprints to pull from the database, and add the descriptor
@@ -81,7 +87,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     # by specifying a lot of filters.
     with gasdb.get_adsorption_client() as ads_client:
         fingerprints = defaults.fingerprints(simulated=True)
-        ads_docs = gasdb.get_docs(ads_client, 'adsorption',
+        ads_docs = gasdb.get_docs(client=ads_client, collection_name='adsorption',
                                   adsorbates=[adsorbate],
                                   fingerprints=fingerprints,
                                   vasp_settings=vasp_settings,
@@ -92,11 +98,11 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
                                   bare_slab_move_max=bare_slab_move_max,
                                   slab_move_max=slab_move_max)
         ads_pdocs = utils.docs_to_pdocs(ads_docs)
-        ads_x = np.array(ads_pdocs[descriptor])
-    cat_docs = gasdb.unsimulated_catalog(adsorbates=[adsorbate],
-                                         vasp_settings=vasp_settings,
-                                         fingerprints=defaults.fingerprints())
+        ads_dE = np.array(ads_pdocs[descriptor])
 
+    # Get the whole catalog
+    with gasdb.get_catalog_client() as cat_client:
+        cat_docs = gasdb.get_docs(client=cat_client, collection_name='catalog')
     # Catalog documents don't have any information about adsorbates. But if our model
     # requires information about adsorbates, then we probably need to put it in.
     # Note that we have an EAFP wrapper to check whether our model is hierarchical or not.
@@ -111,52 +117,100 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
 
     # Create the regressor's prediction
     print('Starting catalog prediction...')
-    cat_x = regressor.predict(cat_docs, block=regressor_block, doc_chunk_size=doc_chunk_size)
+    cat_dE = regressor.predict(cat_docs, block=regressor_block,
+                               processes=processes,
+                               doc_chunk_size=doc_chunk_size)
+
+    # Get indices to split the catalog into sim and unsim lists, then use the indices
+    # to create the appropriate objects
+    print('Splitting the predictions into simulated and unsimulated buckets...')
+    tic = time.time()
+    sim_inds, unsim_inds = gasdb.split_catalog(ads_docs, cat_docs)
+    # We zip, parse, and unzip things so that we only have to parse through each
+    # set of indices once apiece. Although this is harder to read, it saves
+    # computational time and scales better.
+    cat_data = zip(cat_docs, cat_dE)
+    unsim_data = [datum for i, datum in tqdm.tqdm(enumerate(cat_data), total=len(cat_data))
+                  if i in unsim_inds]
+    unsim_cat_docs, unsim_cat_dE = zip(*unsim_data)
+    unsim_cat_docs = list(unsim_cat_docs)
+    unsim_cat_dE = list(unsim_cat_dE)
+    ads_dE_est = [dE for i, dE in tqdm.tqdm(enumerate(cat_dE), total=len(cat_dE))
+                  if i in sim_inds]
+    toc = time.time()
+    print('It took %i seconds to split the [un]simulated data' % (toc-tic))
+
+    # Optional snippet to save all of our predictions
+    if save_all_estimates:
+        print('Saving all of the estimates...')
+        # Add the adsorption energies into the documents. And add tags to tell us whether
+        # the dE came from ML or not.
+        for i, (doc, dE) in enumerate(zip(ads_docs, ads_dE)):
+            doc['dE'] = dE
+            doc['ML'] = False
+            ads_docs[i] = doc
+        for i, (doc, dE) in enumerate(zip(unsim_cat_docs, unsim_cat_dE)):
+            doc['dE'] = dE
+            doc['ML'] = True
+            unsim_cat_docs[i] = doc
+        # Combine all the documents into one list. Then make it json compatible.
+        all_docs = ads_docs + unsim_cat_docs
+        for doc in all_docs:
+            doc['mongo_id'] = str(doc['mongo_id'])
+        # Find the save location and then save
+        gaspy_path = utils.read_rc('gaspy_path')
+        save_folder = gaspy_path + '/GASpy_regressions/pkls/'
+        with open(save_folder + 'all_estimates_for_%s.json' % adsorbate, 'w') as f:
+            json.dump(all_docs, f)
 
     # Filter the data over each fingerprint block, as per the `_minimize_over` function.
     if fp_blocks:
         print('Starting minimize_over...')
         tic = time.time()
-        cat_docs, cat_x, ads_docs, ads_x = _minimize_over(cat_docs, cat_x, ads_docs, ads_x, fp_blocks)
+        cat_docs, cat_dE, ads_docs, ads_dE = _minimize_over(unsim_cat_docs, unsim_cat_dE, ads_docs, ads_dE, fp_blocks)
         toc = time.time()
         print('It took %i seconds to minimize_over' % (toc-tic))
 
-    # We're also going to want to find our regressor's estimate for items that we
-    # have already done simulations on (for parity plots and whatnot).
-    print('Starting subset prediction...')
-    ads_x_est = regressor.predict(ads_docs, block=regressor_block, doc_chunk_size=doc_chunk_size)
-
-    # Transform the volcano x-axis into the y-axis
+    # Transform the volcano x-axis into the y-axis. We use multiprocessing for this
+    # transformation. If you find a memory issue, then you should set chunksize explicitly.
     print('Starting triple volcano-ing...')
-    tic = time.time()
-    cat_y = np.array(utils.multimap(volcano, cat_x)).flatten()
-    ads_y = np.array(utils.multimap(volcano, ads_x)).flatten()
-    ads_y_est = np.array(utils.multimap(volcano, ads_x_est)).flatten()
-    toc = time.time()
+    def calc_volcano(input_energies):  # noqa: E306
+        chunksize = len(input_energies) / processes / 10
+        # We make sure chunksize is at least 1 to avoid zero division errors
+        if chunksize < 1:
+            chunksize = 1
+        output = utils.multimap(volcano, input_energies,
+                                processes=processes,
+                                chunksize=chunksize,
+                                n_calcs=len(input_energies)/chunksize)
+        return np.array(output).flatten()
+    cat_y = calc_volcano(cat_dE)
+    ads_y = calc_volcano(ads_dE)
+    ads_y_est = calc_volcano(ads_dE_est)
 
     # We also save the uncertainties of each of these values [eV].
     # Uncertainties are affixed with `u`.
-    print('Starting data shuffling...')
+    print('Starting data packaging...')
     tic = time.time()
     sim_u = 0.1  # simulation uncertainty
     model_u = regressor.rmses[regressor_block]['train']  # model uncertainty
     est_u = np.sqrt(sim_u**2 + model_u**2)  # total uncertainty of surrogate model
-    ads_x_u = [sim_u]*len(ads_x)
+    ads_dE_u = [sim_u]*len(ads_dE)
     ads_y_u = [0.]*len(ads_y)
-    ads_x_est_u = [est_u]*len(ads_x_est)
+    ads_dE_est_u = [est_u]*len(ads_dE_est)
     ads_y_est_u = [0.]*len(ads_y_est)
-    cat_x_u = [est_u]*len(cat_x)
+    cat_dE_u = [est_u]*len(cat_dE)
     cat_y_u = [0.]*len(cat_y)
 
     # Zip up all of the information about simulated systems
     sim_data = zip(ads_docs,
-                   zip(zip(ads_x, ads_x_u), zip(ads_y, ads_y_u)),
-                   zip(zip(ads_x_est, ads_x_est_u), zip(ads_y_est, ads_y_est_u)))
+                   zip(zip(ads_dE, ads_dE_u), zip(ads_y, ads_y_u)),
+                   zip(zip(ads_dE_est, ads_dE_est_u), zip(ads_y_est, ads_y_est_u)))
     # Zip up all of the information about unsimulated, catalog systems
     unsim_data = zip(cat_docs,
-                     zip(zip(cat_x, cat_x_u), zip(cat_y, cat_y_u)))
+                     zip(zip(cat_dE, cat_dE_u), zip(cat_y, cat_y_u)))
     toc = time.time()
-    print('Took %i seconds to shuffle' % (toc-tic))
+    print('Took %i seconds to package' % (toc-tic))
 
     return sim_data, unsim_data
 

@@ -11,7 +11,6 @@ import copy
 from collections import OrderedDict
 import numpy as np
 from sklearn import preprocessing
-# from gaspy import utils
 
 
 class GASpyPreprocessor(object):
@@ -139,7 +138,6 @@ class GASpyPreprocessor(object):
                 coord = doc['coordination']
                 coordcount = np.sum(lb.transform(coord.split('-')), axis=0)
                 return coordcount
-            # coordcounts = map(_preprocess_coordcount, docs)
             coordcounts = [_preprocess_coordcount(doc) for doc in docs]
             return np.array(coordcounts)
 
@@ -180,7 +178,6 @@ class GASpyPreprocessor(object):
                 coordcount = preprocess_coordcount([{'coordination': coord}])
                 rnnc_count = nnc_count - coordcount
                 return list(rnnc_count)
-            # rnnc_counts = map(_preprocess_rnnc_count, docs)
             rnnc_counts = [_preprocess_rnnc_count(doc) for doc in docs]
             return np.array(rnnc_counts)
 
@@ -216,7 +213,6 @@ class GASpyPreprocessor(object):
                 ads = doc['adsorbates']
                 ads_vector = lb.transform(ads)[0]
                 return ads_vector
-            # ads_vectors = map(_preprocess_ads, docs)
             ads_vectors = [_preprocess_ads(doc) for doc in docs]
             return np.array(ads_vectors)
 
@@ -273,22 +269,11 @@ class GASpyPreprocessor(object):
                 # and then add it to the output
                 coordcount_vector = np.concatenate(coordcount_array, axis=0)
                 return coordcount_vector
-            # neighbors_coordcounts = map(_preprocess_neighbors_coordcounts, docs)
             neighbors_coordcounts = [_preprocess_neighbors_coordcounts(doc) for doc in docs]
 
             return np.array(neighbors_coordcounts)
 
         return preprocess_neighbors_coordcounts
-
-
-    # TODO:  Create this method
-    def _gcn(self, docs=None):
-        raise Exception('This method has not been created yet')
-
-
-    # TODO:  Create this method
-    def _dband_center(self, docs=None):
-        raise Exception('This method has not been created yet')
 
 
     def _hash(self, docs=None, excluded_fingerprints='default'):
@@ -334,8 +319,6 @@ class GASpyPreprocessor(object):
         # Create another function that hashes documents and then transforms them
         # with the binarizer we just made
         def preprocess_hash(docs):
-            # hashes = map(__hash, docs)
-            # bin_hashes = map(lb.transform, hashes)
             hashes = [__hash(doc) for doc in docs]
             bin_hashes = [lb.transform(_hash) for _hash in hashes]
             return bin_hashes
@@ -361,19 +344,3 @@ class GASpyPreprocessor(object):
         # scaled_features = self.scaler.transform(stacked_features)
         # return np.array(scaled_features)
         return stacked_features
-
-
-    # TODO:  Create this method
-    def revert(self, processed_features):
-        '''
-        This method will turn a vector of processed features back into a mongo doc (dictionary)
-        of information.
-
-        Input:
-            preprocessed_features   A numpy array. The first axis extends for len(docs),
-                                    and the second axis contains all of the preprocessed,
-                                    scaled features.
-        Output:
-            docs    A mongo-style list of dictionaries
-        '''
-        pass

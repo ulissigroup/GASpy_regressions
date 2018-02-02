@@ -145,7 +145,6 @@ class GASpyRegressor(object):
                             prediction) enables parallel prediction for SKLearn-based models.
                             You should set this equal to the number of threads you are using.
         '''
-        self.n_jobs = 1
         self.features = features
         self.responses = responses
         self.blocks = blocks
@@ -264,6 +263,7 @@ class GASpyRegressor(object):
                                            x_train, y_train, docs_train)
                 self.x[(None,)]['dev'] = x_dev
                 self.y[(None,)]['dev'] = y_dev
+                self.docs[(None,)]['dev'] = docs_dev
             self.x[(None,)]['train'] = x_train
             self.y[(None,)]['train'] = y_train
             self.docs[(None,)]['train'] = docs_train
@@ -589,7 +589,7 @@ class GASpyRegressor(object):
         self._predict = _predict
 
 
-    def predict(self, docs, block=(None,), processes=32, doc_chunk_size=100):
+    def predict(self, docs, block=(None,), processes=32, doc_chunk_size=1000):
         '''
         This method is a wrapper for whatever `_predict` function that we created with a `fit_*`
         method. The `_predict` function accepts preprocessed inputs. This method does
@@ -609,19 +609,25 @@ class GASpyRegressor(object):
             doc_chunk_size  We use multiprocessing to do predictions. `chunks` dictates how many
                             predictions a child process should do before clearing its memory cache.
         Outputs:
-            predictions     A list of the predictions of each `doc` within `docs`
+            predictions     A flat numpy array of the predictions of each `doc` within `docs`
         '''
-        # Chunk the list into bits
-        def chunks(docs, doc_chunk_size):
-            ''' Yield successive n-sized chunks from l. '''
-            for i in xrange(0, len(docs), doc_chunk_size):
-                yield docs[i:i+doc_chunk_size]
-        chunked_docs = list(chunks(docs, doc_chunk_size))
+        # Turn the list of documents into chunks, i.e., an iterator that creates lists.
+        # This is so we can multiprocess efficiently.
+        def chunks(docs, size):
+            iterator = iter(docs)
+            for first in iterator:
+                yield itertools.chain([first], itertools.islice(iterator, size-1))
+        doc_chunk_iterator = chunks(docs, doc_chunk_size)
+        # Calculate the number of chunks we have so we can pass that information
+        # to our progress bar
+        n_chunks = len(docs)/doc_chunk_size
+        if not len(docs) % doc_chunk_size:
+            n_chunks += 1
 
-        # Make the predictions
+        # Make the predictions via multiprocessing
         print('Making predictions...')
-        predictions = utils.map_method(self, '_predict', chunked_docs, block=block,
-                                       processes=processes)
+        predictions = utils.map_method(self, '_predict', doc_chunk_iterator, chunked=True,
+                                       block=block, processes=processes, n_calcs=n_chunks)
         return np.concatenate(predictions, axis=0).flatten()
 
 
