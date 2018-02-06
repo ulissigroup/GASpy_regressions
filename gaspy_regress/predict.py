@@ -6,9 +6,8 @@ GASpy and the the surrogate model estimations created by GASpy_regressions.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
-import time
-
 import pdb  # noqa: F401
+import time
 import pickle
 import json
 import numpy as np
@@ -103,6 +102,14 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     # Get the whole catalog
     with gasdb.get_catalog_client() as cat_client:
         cat_docs = gasdb.get_docs(client=cat_client, collection_name='catalog')
+    # Get indices to split the catalog into sim and unsim lists, then use the indices
+    # to create the appropriate objects
+    print('Finding the indices to split the catalog...')
+    tic = time.time()
+    sim_inds, unsim_inds = gasdb.split_catalog(ads_docs, cat_docs)
+    toc = time.time()
+    print('It took %i seconds to find the indices to split the catalog' % (toc-tic))
+
     # Catalog documents don't have any information about adsorbates. But if our model
     # requires information about adsorbates, then we probably need to put it in.
     # Note that we have an EAFP wrapper to check whether our model is hierarchical or not.
@@ -111,65 +118,68 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     except AttributeError:
         features = regressor.features
     if 'ads' in features:
-        for i, doc in enumerate(cat_docs):
+        for doc in cat_docs:
             doc['adsorbate'] = doc['adsorbates'][0]
-            cat_docs[i] = doc
-
-    # Create the regressor's prediction
-    print('Starting catalog prediction...')
+    # Create the regressor's estimations
+    print('Starting catalog estimations...')
     cat_dE = regressor.predict(cat_docs, block=regressor_block,
                                processes=processes,
                                doc_chunk_size=doc_chunk_size)
 
-    # Get indices to split the catalog into sim and unsim lists, then use the indices
-    # to create the appropriate objects
-    print('Splitting the predictions into simulated and unsimulated buckets...')
+    # Use the splitting indices we found earlier to split our data.
+    # `unsim_*` objects represent configurations that we never simulated (ML-only).
+    # `ads_*_est` objects represent ML estimations of configurations that we have simulated.
+    # `ads_*` objects represent actual simulation results.
+    print('Splitting all of the simulated and unsimulated data (will see 3 progress bars)...')
+    unsim_cat_docs = [cat_docs[i] for i in tqdm.tqdm(unsim_inds, total=len(unsim_inds))]
+    unsim_cat_dE = [cat_dE[i] for i in tqdm.tqdm(unsim_inds, total=len(unsim_inds))]
+    ads_dE_est = [cat_dE[i] for i in tqdm.tqdm(sim_inds, total=len(sim_inds))]
+
+    # Add the adsorption energies into the documents. And add tags to tell us whether
+    # the dE came from ML or not.
+    print('Adding extra tags to the documents for future reference...')
     tic = time.time()
-    sim_inds, unsim_inds = gasdb.split_catalog(ads_docs, cat_docs)
-    # We zip, parse, and unzip things so that we only have to parse through each
-    # set of indices once apiece. Although this is harder to read, it saves
-    # computational time and scales better.
-    cat_data = zip(cat_docs, cat_dE)
-    unsim_data = [datum for i, datum in tqdm.tqdm(enumerate(cat_data), total=len(cat_data))
-                  if i in unsim_inds]
-    unsim_cat_docs, unsim_cat_dE = zip(*unsim_data)
-    unsim_cat_docs = list(unsim_cat_docs)
-    unsim_cat_dE = list(unsim_cat_dE)
-    ads_dE_est = [dE for i, dE in tqdm.tqdm(enumerate(cat_dE), total=len(cat_dE))
-                  if i in sim_inds]
+    for doc, dE in zip(ads_docs, ads_dE):
+        doc['energy'] = dE
+        doc['ML'] = False
+    for doc, dE in zip(unsim_cat_docs, unsim_cat_dE):
+        doc['energy'] = dE
+        doc['ML'] = True
+    # Combine all the documents into one list. Then make it json compatible.
+    all_docs = ads_docs + unsim_cat_docs
+    for doc in all_docs:
+        doc['mongo_id'] = str(doc['mongo_id'])
     toc = time.time()
-    print('It took %i seconds to split the [un]simulated data' % (toc-tic))
+    print('It took %i seconds to add the extra tags' % (toc-tic))
 
     # Optional snippet to save all of our predictions
     if save_all_estimates:
         print('Saving all of the estimates...')
-        # Add the adsorption energies into the documents. And add tags to tell us whether
-        # the dE came from ML or not.
-        for i, (doc, dE) in enumerate(zip(ads_docs, ads_dE)):
-            doc['dE'] = dE
-            doc['ML'] = False
-            ads_docs[i] = doc
-        for i, (doc, dE) in enumerate(zip(unsim_cat_docs, unsim_cat_dE)):
-            doc['dE'] = dE
-            doc['ML'] = True
-            unsim_cat_docs[i] = doc
-        # Combine all the documents into one list. Then make it json compatible.
-        all_docs = ads_docs + unsim_cat_docs
-        for doc in all_docs:
-            doc['mongo_id'] = str(doc['mongo_id'])
-        # Find the save location and then save
+        tic = time.time()
         gaspy_path = utils.read_rc('gaspy_path')
         save_folder = gaspy_path + '/GASpy_regressions/pkls/'
         with open(save_folder + 'all_estimates_for_%s.json' % adsorbate, 'w') as f:
             json.dump(all_docs, f)
+        toc = time.time()
+        print('It took %i seconds to save all the estimates' % (toc-tic))
 
     # Filter the data over each fingerprint block, as per the `_minimize_over` function.
     if fp_blocks:
         print('Starting minimize_over...')
         tic = time.time()
-        cat_docs, cat_dE, ads_docs, ads_dE = _minimize_over(unsim_cat_docs, unsim_cat_dE, ads_docs, ads_dE, fp_blocks)
+        cat_docs, cat_dE, ads_docs, ads_dE = \
+            _minimize_over(unsim_cat_docs, unsim_cat_dE, ads_docs, ads_dE, fp_blocks)
         toc = time.time()
         print('It took %i seconds to minimize_over' % (toc-tic))
+
+    # Re-perform the ML estimations of the [filtered,] simulated configurations.
+    # We've technically already done them, but this is the easiest way to code
+    # this. If we start running into scaling issues, then we can figure out how
+    # to parse this information out instead of re-calculation.
+    print('Re-calculating the [filtered,] simulated configurations...')
+    ads_dE_est = regressor.predict(ads_docs, block=regressor_block,
+                                   processes=processes,
+                                   doc_chunk_size=doc_chunk_size)
 
     # Transform the volcano x-axis into the y-axis. We use multiprocessing for this
     # transformation. If you find a memory issue, then you should set chunksize explicitly.
@@ -343,10 +353,10 @@ def _minimize_over(cat_docs, cat_values, sim_docs, sim_values, fp_blocks):
     # element is the index of the datum within `values`, and whose second element
     # is the actual `value` from `values`.
     block_data = {}
-    for i, value in enumerate(values):
+    for i, (doc, value) in enumerate(zip(docs, values)):
         # Note that we turn the fingerprints into strings to make sure iterables
         # (like lists for miller indices) don't start doing funny things to our code.
-        block = tuple([str(docs[i][fingerprint]) for fingerprint in fp_blocks])
+        block = tuple([str(doc[fingerprint]) for fingerprint in fp_blocks])
         # EAFP to either append a new entry to an existing block, or create a new block
         try:
             block_data[block].append((i, value))
@@ -355,21 +365,16 @@ def _minimize_over(cat_docs, cat_values, sim_docs, sim_values, fp_blocks):
 
     # Now that our data is divided into blocks, we can start figuring out
     # which datum within each block's data set yields the minimum `value`.
-    # We will then add the index of that datum as a key to `indices`, which
-    # is a search dictionary of indices we'll use to rebuild/filter our data set.
-    indices = {}
+    # We will then add the index of that datum to the `indices` set, which
+    # we will use to rebuild/filter our data set.
+    indices = set()
     for block, data in block_data.iteritems():
-        min_block_index = np.argmin([datum[1] for datum in data])
-        indices[data[min_block_index][0]] = None
+        min_block_index = np.argmin([value for (_, value) in data])
+        indices.add(data[min_block_index][0])
 
-    # Now filter the inputs to create the outputs
-    min_docs = []
-    min_values = []
-    for i, (doc, value) in enumerate(zip(docs, values)):
-        if i in indices:
-            min_docs.append(doc)
-            min_values.append(value)
-    min_values = np.array(min_values)
+    # Now create the inputs to create the outputs
+    min_docs = [docs[i] for i in indices]
+    min_values = [values[i] for i in indices]
 
     # Now un-pool
     cat_docs = []
