@@ -10,7 +10,7 @@ import pdb  # noqa:  F401
 import copy
 from collections import OrderedDict
 import numpy as np
-from sklearn import preprocessing
+from sklearn import preprocessing, decomposition
 
 
 class GASpyPreprocessor(object):
@@ -20,7 +20,7 @@ class GASpyPreprocessor(object):
     into a single numpy array. The preprocessing functions are created in the hidden
     methods (i.e., ones that start with `_`).
     '''
-    def __init__(self, docs, features):
+    def __init__(self, docs, features, dim_red=False, **kwargs):
         '''
         This `__init__` method creates the list of preprocessing functions, `preprocessors`.
         It also creates the feature scaler, `scaler`. In other words:  This class is ready
@@ -36,6 +36,10 @@ class GASpyPreprocessor(object):
                         hidden methods in this class, but without the leading underscores
                         (e.g., 'coordcount'). Order matters, because the pre-processed
                         features will be stacked in order of appearance in this list.
+            dim_red     A string indicating which dimensionality reduction technique you want
+                        to use. Currently accepts `False` for no dimensionality reduction
+                        and 'truncated_svd'.
+            kwargs      Whatever arguments you want to pass to the dimensionality reducer.
         Resulting attributes:
             docs            The same as the `docs` input, but simply saved as an attribute
             preprocessors   An ordered dictionary whose keys are features and whose
@@ -43,6 +47,9 @@ class GASpyPreprocessor(object):
             scaler          An instance of the sklearn.preprocessing.StandardScaler class
                             that has been fit to the preprocessed, stacked `docs`
         '''
+        # We save the training documents because they're used during... training. If we
+        # starting running into [more] serious memory issues, we should consider deleting
+        # these after training is done.
         self.docs = docs
 
         # Create the preprocessors for each feature
@@ -56,7 +63,19 @@ class GASpyPreprocessor(object):
 
         # Create and fit the scaler
         self.scaler = preprocessing.StandardScaler()
-        self.scaler.fit(stacked_features)
+        scaled_features = self.scaler.fit_transform(stacked_features.astype(float))
+
+        # Create and fit the dimensionality reducer. We used both an if-statement and EAFP
+        # because we want to throw an error when the user tries something wrong, but we
+        # don't want to throw an error if they didn't ask for dimensionality reduction.
+        if dim_red:
+            try:
+                self.dim_reducer = getattr(self, '_' + dim_red)(scaled_features, **kwargs)
+            except AttributeError as error:
+                error.message += '; the %s dim_red argument is not recognized' % dim_red
+                raise
+        else:
+            self.dim_reducer = getattr(self, '_do_nothing')()
 
 
     def _energy(self, docs=None):
@@ -105,6 +124,60 @@ class GASpyPreprocessor(object):
         lb.fit(unq_symbols)
 
         return lb
+
+
+    def _do_nothing(self):
+        '''
+        Create a function that does nothing; meant to be used when you don't want
+        to do dimensionality reduction but the pipelines expects one.
+        '''
+        def __do_nothing(inputs):
+            return inputs
+        return __do_nothing
+
+
+    def _pca(self, training_data, **kwargs):
+        '''
+        Create a dimensionality reducing function that uses SKLearn's `PCA` class.
+
+        Inputs:
+            training_data   The data set that you want to train the dimensionality reducer on.
+                            It should probably be a numpy vector.
+            kwargs          Whatever arguments you want to pass to the dimensionality reducer.
+        Output:
+        '''
+        # Use SKLearn's PCA
+        reducer = decomposition.PCA(**kwargs)
+        reducer.fit(training_data)
+
+        # Create the function that the `transform` method will be using
+        def pca(inputs):
+            outputs = reducer.transform(inputs)
+            return outputs
+
+        return pca
+
+
+    def _truncated_svd(self, training_data, **kwargs):
+        '''
+        Create a dimensionality reducing function that uses SKLearn's `TruncatedSVD` class.
+
+        Inputs:
+            training_data   The data set that you want to train the dimensionality reducer on.
+                            It should probably be a numpy vector.
+            kwargs          Whatever arguments you want to pass to the dimensionality reducer.
+        Output:
+        '''
+        # Use SKLearn's TruncatedSVD
+        reducer = decomposition.TruncatedSVD(**kwargs)
+        reducer.fit(training_data)
+
+        # Create the function that the `transform` method will be using
+        def truncated_svd(inputs):
+            outputs = reducer.transform(inputs)
+            return outputs
+
+        return truncated_svd
 
 
     def _coordcount(self, docs=None, return_lb=False):
@@ -337,10 +410,9 @@ class GASpyPreprocessor(object):
                                     and the second axis contains all of the preprocessed,
                                     scaled features.
         '''
-        # Preprocess, stack, and scale the features
+        # Preprocess, stack, scale, and reduce the features
         features = [preprocess(docs) for preprocess in self.preprocessors.values()]
         stacked_features = np.concatenate(tuple(features), axis=1)
-        # TODO:  Figure out how to keep scaling without GP losing scaling terribly
-        # scaled_features = self.scaler.transform(stacked_features)
-        # return np.array(scaled_features)
-        return stacked_features
+        scaled_features = self.scaler.transform(stacked_features.astype(float))
+        preprocessed_features = self.dim_reducer(scaled_features)
+        return preprocessed_features

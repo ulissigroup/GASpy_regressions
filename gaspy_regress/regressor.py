@@ -53,11 +53,12 @@ class GASpyRegressor(object):
                         predictions A numpy array. 1st dimension shows different data points,
                                     while the second dimension shows different responses.
     '''
-    def __init__(self, features, responses, blocks=None,
+    def __init__(self, features, responses, blocks=None, dim_red=None,
                  fingerprints=None, vasp_settings=None,
                  collection='adsorption', energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
-                 train_size=1, dev_size=None, n_bins=20, k_folds=None, random_state=42):
+                 train_size=1, dev_size=None, n_bins=20, k_folds=None, random_state=42,
+                 **kwargs):
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -74,6 +75,11 @@ class GASpyRegressor(object):
                         want to include.  Pretty much just like features.
             blocks      A list of strings for each of the fingerprints on which
                         the user wants to block
+            dim_red     A string indicating the dimensionality reduction technique
+                        you want to use. Defaults to `None`. Reference the
+                        gaspy_regress.preprocessor module for more details.
+            kwargs      Any arguments you want to pass to the dimesionality
+                        reducer.
         Inputs (pulling/filtering options):
             fingerprints        Mongo queries of parameters that you want pulled.
                                 Note that we automatically set some of these queries
@@ -222,7 +228,7 @@ class GASpyRegressor(object):
             raise Exception('Failed to find any data. Please check your query settings.')
 
         # Preprocess the features
-        pp = GASpyPreprocessor(docs, features)
+        pp = GASpyPreprocessor(docs, features, dim_red=dim_red, **kwargs)
         x = pp.transform(docs)
         # Pull out, stack (if necessary), and numpy-array-ify the responses.
         # We might do real preprocessing to these one day. But not today.
@@ -245,8 +251,8 @@ class GASpyRegressor(object):
                                    'all data': docs}}
         # If we're splitting, then start splitting
         else:
-            x_train, x_test, y_train, y_test, docs_train, docs_test = \
-                self._stratified_split(n_bins, train_size, random_state, x, y, docs)
+            y_train, y_test, x_train, x_test, docs_train, docs_test = \
+                self._stratified_split(n_bins, train_size, random_state, y, x, docs)
             # Now store the information in class attributes
             self.x = {(None,): {'test': x_test,
                                 'all data': x}}
@@ -258,9 +264,9 @@ class GASpyRegressor(object):
             # `dev_size` because we're splitting from the training set, not the whole set.
             if dev_size:
                 dev_size = dev_size/train_size
-                x_train, x_dev, y_train, y_dev, docs_train, docs_dev = \
+                y_train, y_dev, x_train, x_dev, docs_train, docs_dev = \
                     self._stratified_split(n_bins, dev_size, random_state,
-                                           x_train, y_train, docs_train)
+                                           y_train, x_train, docs_train)
                 self.x[(None,)]['dev'] = x_dev
                 self.y[(None,)]['dev'] = y_dev
                 self.docs[(None,)]['dev'] = docs_dev
@@ -366,13 +372,15 @@ class GASpyRegressor(object):
             split_data = train_test_split(*arrays, train_size=train_size,
                                           stratify=y_binned, random_state=random_state)
         except ValueError as err:
-            err.message += '; you should decrease n_bins'
-            raise
+            import sys
+            raise type(err), type(err)(err.message +
+                                       '\nTry decreasing n_bins when initializing GASpy_Regressor'), sys.exc_info()[2]
 
         return split_data
 
 
-    def fit_sk(self, regressor, x_dict=None, y_dict=None, blocks=None, model_name=None):
+    def fit_sk(self, regressor, x_dict=None, y_dict=None,
+               blocks=None, model_name=None, dim_red=None):
         '''
         This method will assume that the regressor object you are passing it is an SKLearn
         type object, and will thus have `fit` and `predict` methods.
@@ -387,6 +395,9 @@ class GASpyRegressor(object):
                         the regression on.
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
+            dim_red     A string indicating the type of dimensionality reduction you want
+                        to use when preprocessing the features. If `None`, then no
+                        dimensionality reduction will be used.
         '''
         # Set defaults
         if not x_dict:
@@ -443,7 +454,8 @@ class GASpyRegressor(object):
         self.models = models
 
 
-    def fit_tpot(self, regressor, x_dict=None, y_dict=None, blocks=None, model_name=None):
+    def fit_tpot(self, regressor, x_dict=None, y_dict=None,
+                 blocks=None, model_name=None, dim_red=None):
         '''
         This method will assume that the regressor object you are passing it is a TPOT regressor
         type object, and will thus have `fit` and `predict` methods. And it will need
@@ -459,6 +471,9 @@ class GASpyRegressor(object):
                         the regression on.
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
+            dim_red     A string indicating the type of dimensionality reduction you want
+                        to use when preprocessing the features. If `None`, then no
+                        dimensionality reduction will be used.
         '''
         # Set defaults
         if not x_dict:
@@ -519,7 +534,7 @@ class GASpyRegressor(object):
 
 
     def fit_hierarchical(self, outer_regressor, outer_method, outer_features,
-                         blocks=None, model_name=None):
+                         blocks=None, model_name=None, dim_red=None, **kwargs):
         '''
         This method will wrap a regression model around the regression that you've already
         fit (using one of the other `fit_*` methods). In other words, it will try to fit
@@ -533,6 +548,11 @@ class GASpyRegressor(object):
                         the regression on.
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
+            dim_red     A string indicating the dimensionality reduction technique
+                        you want to use. Defaults to `None`. Reference the
+                        gaspy_regress.preprocessor module for more details.
+            kwargs      Any arguments you want to pass to the dimesionality
+                        reducer.
         '''
         # Set defaults
         if not blocks:
@@ -556,7 +576,8 @@ class GASpyRegressor(object):
 
         # Create the outer preprocessor
         try:
-            pp = GASpyPreprocessor(docs[(None,)]['train'], outer_features)
+            pp = GASpyPreprocessor(docs[(None,)]['train'], outer_features,
+                                   dim_red=dim_red, **kwargs)
         except KeyError:
             raise KeyError('You probably tried to ask for an outer feature, but did not specify an appropriate `fingerprints` query to pull the necessary information out.')
         # Preprocess docs again, but this time for the outer regressor
