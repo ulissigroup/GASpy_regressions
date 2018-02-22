@@ -77,6 +77,9 @@ class GASpyPreprocessor(object):
         else:
             self.dim_reducer = getattr(self, '_do_nothing')()
 
+        # Delete the documents now that we're done with them. Because they're probably huge.
+        del self.docs
+
 
     def _energy(self, docs=None):
         '''
@@ -112,10 +115,7 @@ class GASpyPreprocessor(object):
             docs = copy.deepcopy(self.docs)
 
         # Pull out all of the symbols that we can find in `docs`
-        symbols = [doc['symbols'] for doc in docs
-                   # TODO:  Remove this conditional after we start looking at carbides
-                   # or oxides. We only put this here to appease ALAMO
-                   if (doc['symbols'] != 'C' and doc['symbols'] != 'O')]
+        symbols = [doc['symbols'] for doc in docs]
 
         # Find all of the unique symbols. Then fit a label binarizer on them
         # that will be able to convert a single string into a binary vector.
@@ -250,7 +250,7 @@ class GASpyPreprocessor(object):
                 nnc_count = np.sum(lb.transform(nnc.split('-')), axis=0)
                 coordcount = preprocess_coordcount([{'coordination': coord}])
                 rnnc_count = nnc_count - coordcount
-                return list(rnnc_count)
+                return rnnc_count.flatten()
             rnnc_counts = [_preprocess_rnnc_count(doc) for doc in docs]
             return np.array(rnnc_counts)
 
@@ -393,7 +393,7 @@ class GASpyPreprocessor(object):
         # with the binarizer we just made
         def preprocess_hash(docs):
             hashes = [__hash(doc) for doc in docs]
-            bin_hashes = [lb.transform(_hash) for _hash in hashes]
+            bin_hashes = lb.transform(hashes)
             return bin_hashes
 
         return preprocess_hash

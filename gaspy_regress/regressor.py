@@ -379,8 +379,7 @@ class GASpyRegressor(object):
         return split_data
 
 
-    def fit_sk(self, regressor, x_dict=None, y_dict=None,
-               blocks=None, model_name=None, dim_red=None):
+    def fit_sk(self, regressor, x_dict=None, y_dict=None, blocks=None, model_name=None):
         '''
         This method will assume that the regressor object you are passing it is an SKLearn
         type object, and will thus have `fit` and `predict` methods.
@@ -395,9 +394,6 @@ class GASpyRegressor(object):
                         the regression on.
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
-            dim_red     A string indicating the type of dimensionality reduction you want
-                        to use when preprocessing the features. If `None`, then no
-                        dimensionality reduction will be used.
         '''
         # Set defaults
         if not x_dict:
@@ -454,8 +450,7 @@ class GASpyRegressor(object):
         self.models = models
 
 
-    def fit_tpot(self, regressor, x_dict=None, y_dict=None,
-                 blocks=None, model_name=None, dim_red=None):
+    def fit_tpot(self, regressor, x_dict=None, y_dict=None, blocks=None, model_name=None):
         '''
         This method will assume that the regressor object you are passing it is a TPOT regressor
         type object, and will thus have `fit` and `predict` methods. And it will need
@@ -471,9 +466,6 @@ class GASpyRegressor(object):
                         the regression on.
             model_name  If you want to name this model something differently, then go
                         ahead. Doing so might reduce regressor saving conflicts.
-            dim_red     A string indicating the type of dimensionality reduction you want
-                        to use when preprocessing the features. If `None`, then no
-                        dimensionality reduction will be used.
         '''
         # Set defaults
         if not x_dict:
