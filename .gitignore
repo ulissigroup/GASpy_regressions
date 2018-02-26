@@ -17,5 +17,5 @@
 # The Google credentials for the cloud files that we'll be interfacing with
 .gdrive_credentials.json
 
-# The pickles
-/pkls/*
+# The cache
+/cache/*

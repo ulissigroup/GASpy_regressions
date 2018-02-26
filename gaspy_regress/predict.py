@@ -157,7 +157,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         print('Saving all of the estimates...')
         tic = time.time()
         gaspy_path = utils.read_rc('gaspy_path')
-        save_folder = gaspy_path + '/GASpy_regressions/pkls/'
+        save_folder = gaspy_path + '/GASpy_regressions/cache/'
         with open(save_folder + 'all_estimates_for_%s.json' % adsorbate, 'w') as f:
             json.dump(all_docs, f)
         toc = time.time()
