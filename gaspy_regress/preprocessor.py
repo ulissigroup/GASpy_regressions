@@ -70,12 +70,12 @@ class GASpyPreprocessor(object):
         # don't want to throw an error if they didn't ask for dimensionality reduction.
         if dim_red:
             try:
-                self.dim_reducer = getattr(self, '_' + dim_red)(scaled_features, **kwargs)
+                self.dim_reduce = getattr(self, '_' + dim_red)(scaled_features, **kwargs)
             except AttributeError as error:
                 error.message += '; the %s dim_red argument is not recognized' % dim_red
                 raise
         else:
-            self.dim_reducer = getattr(self, '_do_nothing')()
+            self.dim_reduce = getattr(self, '_do_nothing')()
 
         # Delete the documents now that we're done with them. Because they're probably huge.
         del self.docs
@@ -147,12 +147,12 @@ class GASpyPreprocessor(object):
         Output:
         '''
         # Use SKLearn's PCA
-        reducer = decomposition.PCA(**kwargs)
-        reducer.fit(training_data)
+        self.dim_reducer = decomposition.PCA(**kwargs)
+        self.dim_reducer.fit(training_data)
 
         # Create the function that the `transform` method will be using
         def pca(inputs):
-            outputs = reducer.transform(inputs)
+            outputs = self.dim_reducer.transform(inputs)
             return outputs
 
         return pca
@@ -169,12 +169,12 @@ class GASpyPreprocessor(object):
         Output:
         '''
         # Use SKLearn's TruncatedSVD
-        reducer = decomposition.TruncatedSVD(**kwargs)
-        reducer.fit(training_data)
+        self.dim_reducer = decomposition.TruncatedSVD(**kwargs)
+        self.dim_reducer.fit(training_data)
 
         # Create the function that the `transform` method will be using
         def truncated_svd(inputs):
-            outputs = reducer.transform(inputs)
+            outputs = self.dim_reducer.transform(inputs)
             return outputs
 
         return truncated_svd
@@ -414,5 +414,5 @@ class GASpyPreprocessor(object):
         features = [preprocess(docs) for preprocess in self.preprocessors.values()]
         stacked_features = np.concatenate(tuple(features), axis=1)
         scaled_features = self.scaler.transform(stacked_features.astype(float))
-        preprocessed_features = self.dim_reducer(scaled_features)
+        preprocessed_features = self.dim_reduce(scaled_features)
         return preprocessed_features
