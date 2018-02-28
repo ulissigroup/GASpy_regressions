@@ -117,9 +117,9 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         features = regressor.features + regressor.features_inner
     except AttributeError:
         features = regressor.features
-    if 'ads' in features:
+    if 'ads' in features or 'pooled_coordatoms_chemfp0' in features:
         for doc in cat_docs:
-            doc['adsorbate'] = doc['adsorbates'][0]
+            doc['adsorbate'] = adsorbate
     # Create the regressor's estimations
     print('Starting catalog estimations...')
     cat_dE = regressor.predict(cat_docs, block=regressor_block,

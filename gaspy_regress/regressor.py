@@ -53,9 +53,9 @@ class GASpyRegressor(object):
                         predictions A numpy array. 1st dimension shows different data points,
                                     while the second dimension shows different responses.
     '''
-    def __init__(self, features, responses, blocks=None, dim_red=None,
-                 fingerprints=None, vasp_settings=None,
-                 collection='adsorption', energy_min=-4, energy_max=4, f_max=0.5,
+    def __init__(self, features, responses, blocks=None, chem_fp_ads=None, dim_red=None,
+                 fingerprints=None, vasp_settings=None, collection='adsorption',
+                 energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
                  train_size=1, dev_size=None, n_bins=20, k_folds=None, random_state=42,
                  **kwargs):
@@ -75,6 +75,12 @@ class GASpyRegressor(object):
                         want to include.  Pretty much just like features.
             blocks      A list of strings for each of the fingerprints on which
                         the user wants to block
+            chem_fp_ads Some of our chemical fingerprinting features using the simulated
+                        adsorption energies. So we need to know which adsorbate to
+                        consider when doing this. This argument, which should be a string,
+                        indicates which adsorbate you want to use when doing the
+                        chemical fingerprint. Obviously, this argument only does anything
+                        when one of your features involves chemical fingerprinting.
             dim_red     A string indicating the dimensionality reduction technique
                         you want to use. Defaults to `None`. Reference the
                         gaspy_regress.preprocessor module for more details.
@@ -178,6 +184,11 @@ class GASpyRegressor(object):
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
+        if any(['chemfp' in feature_name for feature_name in features]):
+            fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
+            fingerprints['symbols'] = '$atoms.chemical_symbols'
+        if 'pooled_coordatoms_chemfp0' in features:
+            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
         if 'hash' in features:
             fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
             fingerprints['miller'] = '$processed_data.calculation_info.miller'
@@ -226,9 +237,12 @@ class GASpyRegressor(object):
                                   slab_move_max=slab_move_max)
         if not docs:
             raise Exception('Failed to find any data. Please check your query settings.')
+        # Add the 'adsorbate' key to the dictionaries. Because why the hell not.
+        for doc in docs:
+            doc['adsorbate'] = doc['adsorbates'][0]
 
         # Preprocess the features
-        pp = GASpyPreprocessor(docs, features, dim_red=dim_red, **kwargs)
+        pp = GASpyPreprocessor(docs, features, chem_fp_ads=chem_fp_ads, dim_red=dim_red, **kwargs)
         x = pp.transform(docs)
         # Pull out, stack (if necessary), and numpy-array-ify the responses.
         # We might do real preprocessing to these one day. But not today.
