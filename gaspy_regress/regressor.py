@@ -648,7 +648,8 @@ class GASpyRegressor(object):
 
         Inputs:
             metric  A string indicating which performance metric you want plotted.
-                    Can be 'rmse' or 'mae'.
+                    Can be 'rmse', 'mae', or 'mad' for "root mean squared error",
+                    "mean absolute error", and "median absolute deviation", respectively.
         '''
         try:
             # Calculate and print the performance metrics for each block of data
@@ -656,14 +657,16 @@ class GASpyRegressor(object):
             for block, _residuals in self.residuals.iteritems():
                 for dataset, __residuals in _residuals.iteritems():
                     # Here are the different metrics we're able to calculate now
+                    y = np.zeros(__residuals.shape)
+                    y_hat = __residuals
                     if metric in set(['rmse', 'RMSE']):
-                        y = np.zeros(__residuals.shape)
-                        y_hat = __residuals
                         metric_values[block][dataset] = np.sqrt(metrics.mean_squared_error(y, y_hat))
                     elif metric in set(['mae', 'MAE']):
-                        y = np.zeros(__residuals.shape)
-                        y_hat = __residuals
                         metric_values[block][dataset] = metrics.mean_absolute_error(y, y_hat)
+                    elif metric in set(['mad', 'MAD']):
+                        median = np.median(y_hat)
+                        deviation = y_hat - median
+                        metric_values[block][dataset] = np.median(np.abs(deviation))
                     else:
                         raise SyntaxError('"%s" is not a valid argument for "metric"' % metric)
             print('%s values:' % metric)
