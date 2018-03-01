@@ -25,7 +25,7 @@ class GASpyPreprocessor(object):
     into a single numpy array. The preprocessing functions are created in the hidden
     methods (i.e., ones that start with `_`).
     '''
-    def __init__(self, docs, features, chem_fp_ads=None, dim_red=False, **kwargs):
+    def __init__(self, docs, features, dim_red=False, **kwargs):
         '''
         This `__init__` method creates the list of preprocessing functions, `preprocessors`.
         It also creates the feature scaler, `scaler`. In other words:  This class is ready
@@ -41,12 +41,6 @@ class GASpyPreprocessor(object):
                         hidden methods in this class, but without the leading underscores
                         (e.g., 'coordcount'). Order matters, because the pre-processed
                         features will be stacked in order of appearance in this list.
-            chem_fp_ads Some of our chemical fingerprinting features using the simulated
-                        adsorption energies. So we need to know which adsorbate to
-                        consider when doing this. This argument, which should be a string,
-                        indicates which adsorbate you want to use when doing the
-                        chemical fingerprint. Obviously, this argument only does anything
-                        when one of your features involves chemical fingerprinting.
             dim_red     A string indicating which dimensionality reduction technique you want
                         to use. Currently accepts `False` for no dimensionality reduction
                         and 'truncated_svd'.
@@ -62,24 +56,6 @@ class GASpyPreprocessor(object):
         # starting running into [more] serious memory issues, we should consider deleting
         # these after training is done.
         self.docs = docs
-
-        # If we're doing chemical fingerprinting, then pull out the mendeleev objects
-        # for each element
-        if any(['chemfp0' in feature_name for feature_name in features]):
-            # Find all of the unique substrate elements in our documents
-            symbols = [doc['symbols'] for doc in docs]
-            self.non_substrate_elements = set([chem_fp_ads, 'U', ''])
-            all_elements = np.unique([element for sublist in symbols for element in sublist
-                                      if element not in self.non_substrate_elements])
-            # Pull out the appropriate mendeleev information for each element and save the
-            # information into a class attribute.
-            self.mendeleev_data = dict.fromkeys(all_elements)
-            for el in all_elements:
-                self.mendeleev_data[el] = getattr(mendeleev, el)
-            # Assign the `chem_fp_ads` as an attribute for later use. This could be a
-            # method argument, but we pass it as an attribute to keep the method-calling
-            # portion of __init__ consistent across methods.
-            self.chem_fp_ads = chem_fp_ads
 
         # Create the preprocessors for each feature
         self.preprocessors = OrderedDict.fromkeys(features)
@@ -373,6 +349,32 @@ class GASpyPreprocessor(object):
         return preprocess_neighbors_coordcounts
 
 
+    def __pull_mendeleev_data(self, docs=None):
+        '''
+        This method fetches Mendeleev data for all elements that we might want to look at.
+        We do this here so that we only have to pull Mendeleev data once, thereby speeding
+        things up.
+
+        Input:
+            docs    Mongo json dictionaries. Defaults to `self.docs`, which should be
+                    the document supplied during initialization.
+        Resulting attribute:
+            mendeleev_data  A dictionary whose keys are the element names and whose
+                            attributes are the mendeleev objects.
+        '''
+        if not docs:
+            docs = copy.deepcopy(self.docs)
+
+        # Find all of the unique substrate elements in our documents
+        symbols = [doc['symbols'] for doc in docs]
+        all_elements = set(element for sublist in symbols for element in sublist)
+        # Pull out the appropriate mendeleev information for each element and save the
+        # information into a class attribute.
+        self.mendeleev_data = dict.fromkeys(all_elements)
+        for el in all_elements:
+            self.mendeleev_data[el] = getattr(mendeleev, el)
+
+
     def __calculate_per_atom_energies(self, docs):
         '''
         This method uses pure-metal adsorption data to calculate the average adsorption
@@ -425,11 +427,7 @@ class GASpyPreprocessor(object):
             counts = self.doc_to_coordcount(docs_subset)
             energies = np.array([doc['energy'] for doc in docs_subset])
             regressor = LinearRegression(fit_intercept=False)
-            try:
-                regressor.fit(counts, energies)
-            except ValueError as error:
-                error.args = (error.args[0] + '; you might not have supplied a `chem_fp_ads` argument',)
-                raise
+            regressor.fit(counts, energies)
 
             # Pull out the coefficients of the regressor. These coefficients are the
             # "per atom adsorption energy". There is one energy per element, so we store
@@ -523,9 +521,12 @@ class GASpyPreprocessor(object):
 
         # This method requires the per-atom-energies. So we call the pertinent method
         # that will calculate these values and assign them as attributes. We only do this
-        # if it looks like this method has not been called already.
+        # if it looks like this method has not been called already. Then do the same
+        # for Mendeleev data.
         if not hasattr(self, 'per_atom_energies'):
             self.__calculate_per_atom_energies(docs)
+        if not hasattr(self, 'mendelee_data'):
+            self.__pull_mendeleev_data(docs)
 
         # Calculate `dummy_fps`
         self.dummy_fps = {}
@@ -570,10 +571,10 @@ class GASpyPreprocessor(object):
         # We need to calculate the per-atom-energies and also establish some dummy features.
         # These two methods do this and assign them as attributes. Note the `if-then` that
         # makes sure we only call these methods if they have not yet been executed.
-        if not hasattr(self, 'per_atom_energies'):
-            self.__calculate_per_atom_energies(docs)
         if not hasattr(self, 'dummy_pfs'):
             self.__define_dummy_chemfp0(docs)
+        if not hasattr(self, 'per_atom_energies'):
+            self.__calculate_per_atom_energies(docs)
 
         def preprocess_coord_chemfp0(docs):
             # This feature needs to know the adsorbate. Let's make sure that the adsorbate

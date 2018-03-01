@@ -44,7 +44,7 @@ class GASpyRegressor(object):
                         predictions A numpy array. 1st dimension shows different data points,
                                     while the second dimension shows different responses.
     '''
-    def __init__(self, features, responses, blocks=None, chem_fp_ads=None, dim_red=None,
+    def __init__(self, features, responses, blocks=None, dim_red=None,
                  fingerprints=None, vasp_settings=None, collection='adsorption',
                  energy_min=-4, energy_max=4, f_max=0.5,
                  ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
@@ -66,12 +66,6 @@ class GASpyRegressor(object):
                         want to include.  Pretty much just like features.
             blocks      A list of strings for each of the fingerprints on which
                         the user wants to block
-            chem_fp_ads Some of our chemical fingerprinting features using the simulated
-                        adsorption energies. So we need to know which adsorbate to
-                        consider when doing this. This argument, which should be a string,
-                        indicates which adsorbate you want to use when doing the
-                        chemical fingerprint. Obviously, this argument only does anything
-                        when one of your features involves chemical fingerprinting.
             dim_red     A string indicating the dimensionality reduction technique
                         you want to use. Defaults to `None`. Reference the
                         gaspy_regress.preprocessor module for more details.
@@ -240,7 +234,7 @@ class GASpyRegressor(object):
             doc['adsorbate'] = doc['adsorbates'][0]
 
         # Preprocess the features
-        pp = GASpyPreprocessor(docs, features, chem_fp_ads=chem_fp_ads, dim_red=dim_red, **kwargs)
+        pp = GASpyPreprocessor(docs, features, dim_red=dim_red, **kwargs)
         x = pp.transform(docs)
         # Pull out, stack (if necessary), and numpy-array-ify the responses.
         # We might do real preprocessing to these one day. But not today.
@@ -256,22 +250,22 @@ class GASpyRegressor(object):
         self.pp = pp
         if train_size == 1:
             self.x = {(None,): {'train': x,
-                                'all data': x}}
+                                'all': x}}
             self.y = {(None,): {'train': y,
-                                'all data': y}}
+                                'all': y}}
             self.docs = {(None,): {'train': docs,
-                                   'all data': docs}}
+                                   'all': docs}}
         # If we're splitting, then start splitting
         else:
             y_train, y_test, x_train, x_test, docs_train, docs_test = \
                 self._stratified_split(n_bins, train_size, random_state, y, x, docs)
             # Now store the information in class attributes
             self.x = {(None,): {'test': x_test,
-                                'all data': x}}
+                                'all': x}}
             self.y = {(None,): {'test': y_test,
-                                'all data': y}}
+                                'all': y}}
             self.docs = {(None,): {'test': docs_test,
-                                   'all data': docs}}
+                                   'all': docs}}
             # Do it all again, but for the development set. Note that we re-calculate
             # `dev_size` because we're splitting from the training set, not the whole set.
             if dev_size:
@@ -318,7 +312,7 @@ class GASpyRegressor(object):
             # if blocks = ['adsorbate', 'top'], then block_values could be
             # [['O', 'CO'], ['Top', 'Bottom']]. We use block_values to create `block_list`.
             unique_blocks = []
-            docs = self.docs[(None,)]['all data']
+            docs = self.docs[(None,)]['all']
             for block in blocks:
                 block_values = [doc[block] for doc in docs]
                 unique_values = np.unique(block_values).tolist()
@@ -430,7 +424,7 @@ class GASpyRegressor(object):
             models[block].fit(x_dict[block]['train'], y_dict[block]['train'])
 
             # Post-process the results for each set of training, testing, and
-            # all data
+            # all
             for dataset, y in y_dict[block].iteritems():
                 y_hat = models[block].predict(x_dict[block][dataset])
                 residuals[block][dataset] = y - y_hat
@@ -500,7 +494,7 @@ class GASpyRegressor(object):
             models[block] = models[block].fitted_pipeline_
 
             # Post-process the results for each set of training, testing, and
-            # all data
+            # all
             for dataset, y in y_dict[block].iteritems():
                 y_hat = models[block].predict(x_dict[block][dataset])
                 residuals[block][dataset] = y - y_hat
@@ -667,9 +661,7 @@ class GASpyRegressor(object):
                     elif metric in set(['mae', 'MAE']):
                         metric_values[block][dataset] = metrics.mean_absolute_error(y, y_hat)
                     elif metric in set(['mad', 'MAD']):
-                        median = np.median(y_hat)
-                        deviation = y_hat - median
-                        metric_values[block][dataset] = np.median(np.abs(deviation))
+                        metric_values[block][dataset] = metrics.median_absolute_error(y, y_hat)
                     else:
                         raise SyntaxError('"%s" is not a valid argument for "metric"' % metric)
             print('%s values:' % metric)
@@ -688,9 +680,9 @@ class GASpyRegressor(object):
         Create a parity plot of the model that's been fit.
 
         Input:
-            split   A boolean indicating whether you want to plot train and test
-                    separately or together. Note that this is effectively ignored
-                    if you instantiated this class with `train_size == 1`.
+            split   A boolean indicating whether you want to differentiate train
+                    and test (i.e., pool them or not). Note that this is effectively
+                    ignored if you instantiated this class with `train_size == 1`.
             jupyter A boolean that you pass to tell this class whether you are
                     in a Jupyter notebook or not. This will change how it displays.
             plotter A string indicating the plotting tool you want to use. It can
@@ -744,31 +736,33 @@ class GASpyRegressor(object):
         y_hat_out = {}
         text_out = {}
 
-        traces = []
-        # Make a plotly trace for each block & dataset
+        # Set the figure size if we're using matplotlib
+        if plotter == 'matplotlib':
+            plt.figure(figsize=figsize)
+
         for block in self.residuals:
-            # Define the data sets we want to plot via the `split` argument.
+            # Do some data parsing depending on what we want to show in the plot
             if split:
                 datasets = self.x[(None,)].keys()
                 try:
-                    datasets.remove('all data')  # Remove redundant plots
+                    datasets.remove('all')  # Remove redundant plots
                 except ValueError:
                     pass
             else:
-                datasets = ['all data']
+                datasets = ['all']
+            # Unpack data from the class attributes
             for dataset in datasets:
-                # Unpack data from the class attributes
                 y = self.y[block][dataset]
                 docs = self.docs[block][dataset]
                 residuals = self.residuals[block][dataset]
-                # Calculate the model's prediction
+                # Calculate the model's prediction and enact any shifts
                 y_hat = y - residuals
-                # Perform the shifting
                 y = y + shift
                 y_hat = y_hat + shift
 
                 # Plot it
                 if plotter == 'plotly':
+                    traces = []
                     # If we're using plotly, then add hovertext, `text`
                     text = ['']*len(docs)
                     for i, doc in enumerate(docs):
@@ -780,8 +774,8 @@ class GASpyRegressor(object):
                                              text=text))
                     text_out[(block, dataset)] = text
                 elif plotter == 'matplotlib':
-                    plt.figure(figsize=figsize)
-                    plt.scatter(y, y_hat, s=s, alpha=alpha)
+                    plt.scatter(y, y_hat, s=s, alpha=alpha,
+                                label='%s data of %s block' % (dataset, block))
                 else:
                     raise Exception('"%s" is an unrecognized argument for "plotter"', plotter)
                 # Add the information to the output to return
@@ -809,22 +803,22 @@ class GASpyRegressor(object):
             plt.xlim(lims)
             plt.ylim(lims)
             plt.savefig(fname, bbox_inches='tight')
+            plt.legend()
             plt.show()
 
         # Return the data in case the user wants to do something with it
         return y_out, y_hat_out, text_out
 
 
-    def residual_plot(self, figsize=None, xlims=None, xticks=None, xlabel='Residuals', font_scale=2):
+    def residual_plot(self, figsize=None, xlim=None, xticks=None, xlabel='Residuals', font_scale=2):
         '''
         Create a panel of historgrams of the model residuals.
 
         Inputs:
             figsize     A 2-tuple indicating the size of the panel. Defaults to (15, 15)
-            xlims       A 2-element sequence indicating the limits you want to put in for all
-                        the x-axes on the histograms. Defaults to -1 and 1.
+            xlim        A sequence of floats indicating the x range you want to plot over.
             xticks      A list for the locations you want x-axis tick points at. Defaults to
-                        [-1, 0, 1].
+                        letting matplotlib take care of it.
             xlabel      String indicating the x-axis label you want to put on the entire panel
             font_scale  Integer (or float?) indicating the scale of the font you want to use.
         '''
@@ -835,10 +829,6 @@ class GASpyRegressor(object):
         # Set defaults
         if not figsize:
             figsize = (15, 15)
-        if not xlims:
-            xlims = (-0.4, 0.4)
-        if not xticks:
-            xticks = range(-1, 1)
         if not xlabel:
             xlabel = 'Residuals'
 
@@ -856,7 +846,7 @@ class GASpyRegressor(object):
         n_datasets = len(datasets)
         fig, axes = plt.subplots(nrows=n_datasets, ncols=n_blocks, figsize=figsize)
 
-        # Create each of the subplots
+        # Create each of the subplots.
         for i, (block, _residuals) in enumerate(residuals.iteritems()):
             for j, (dataset, __residuals) in enumerate(_residuals.iteritems()):
                 # Get the axis object for this subplot. Use EAFP to deal with
@@ -866,10 +856,12 @@ class GASpyRegressor(object):
                 except IndexError:
                     ax = axes[max((i, j))]
                 # Make the plot and format it
-                sns.distplot(__residuals, kde=False, ax=ax)
-                ax.set_xlim(*xlims)
-                ax.set_xticks(xticks)
+                if xticks:
+                    ax.set_xticks(xticks)
+                if xlim:
+                    ax.set_xlim(xlim[0], xlim[1])
                 ax.set_yticks([])
+                sns.distplot(__residuals, kde=False, ax=ax)
 
         # Label the blocks and datasets if we have an array of panels
         if n_blocks > 1 and n_datasets > 1:
