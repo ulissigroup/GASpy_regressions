@@ -184,11 +184,15 @@ class GASpyRegressor(object):
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
             fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
-        if any(['chemfp' in feature_name for feature_name in features]):
-            fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
+        if 'coordatoms_chemfp0' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
-        if 'pooled_coordatoms_chemfp0' in features:
+            fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
+        if 'coordatoms_chemfp0' in features:
+            fingerprints['symbols'] = '$atoms.chemical_symbols'
+            fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
+            fingerprints['coordination'] = '$processed_data.fp_final.coordination'
+            fingerprints['neighborcoord'] = '$processed_data.fp_final.neighborcoord'
         if 'hash' in features:
             fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
             fingerprints['miller'] = '$processed_data.calculation_info.miller'

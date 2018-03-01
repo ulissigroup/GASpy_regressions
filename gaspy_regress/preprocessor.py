@@ -65,7 +65,7 @@ class GASpyPreprocessor(object):
 
         # If we're doing chemical fingerprinting, then pull out the mendeleev objects
         # for each element
-        if any(['chemfp' in feature_name for feature_name in features]):
+        if any(['chemfp0' in feature_name for feature_name in features]):
             # Find all of the unique substrate elements in our documents
             symbols = [doc['symbols'] for doc in docs]
             self.non_substrate_elements = set([chem_fp_ads, 'U', ''])
@@ -368,13 +368,12 @@ class GASpyPreprocessor(object):
                 coordcount_vector = np.concatenate(coordcount_array, axis=0)
                 return coordcount_vector
             neighbors_coordcounts = [_preprocess_neighbors_coordcounts(doc) for doc in docs]
-
             return np.array(neighbors_coordcounts)
 
         return preprocess_neighbors_coordcounts
 
 
-    def __calculate_per_atom_energies(self, docs, doc_to_counts, lb):
+    def __calculate_per_atom_energies(self, docs):
         '''
         This method uses pure-metal adsorption data to calculate the average adsorption
         energy per binding atom. For example:  If the average CO binding energy on Cu
@@ -383,21 +382,25 @@ class GASpyPreprocessor(object):
         energy per binding atom for Cu would be -0.25 eV.
 
         Inputs:
-            docs            Mongo json dictionaries.
-            doc_to_counts   A function that can convert an adsorption site document
-                            (the ones in `docs`) into a binary vector of counts for
-                            each element. You should get this from the `_coordcount`
-                            or `neighbors_coordcounts` methods.
-            lb              The label binarizer used to help create the `doc_to_counts`
-                            function
-        Output:
-            per_atom_energies   A nested dictionary whose keys are the adsorbates that
-                                you want the energies for. The values are dictionaries
-                                whose keys are the substate elements found in `docs`
-                                and whose values are the average per-atom
-                                adsorption energy for that element.
+            docs    Mongo json dictionaries.
+        Resulting attributes:
+            doc_to_coordcount       A function that converts a mongo document of a site
+                                    into a coordcount
+            lb                      A fitted SKLearn label binarizer that can transform
+                                    a coordination into a binary vector (or vice versa)
+            compositions_by_mpid    A dictionary whose keys are mpid and whose values
+                                    are lists of strings for each element in that MPID
+            per_atom_energies       A nested dictionary whose keys are the adsorbates that
+                                    you want the energies for. The values are dictionaries
+                                    whose keys are the substate elements found in `docs`
+                                    and whose values are the average per-atom
+                                    adsorption energy for that element.
         '''
         docs = copy.deepcopy(docs)
+
+        # This coordcount calculator and label binarizer
+        # will help us calculate per-atom-energies
+        self.doc_to_coordcount, self.lb = self._coordcount(docs, return_lb=True)
 
         # Filter the documents to include only pure metals. We do this by first
         # finding compositions of all of the mpid's we're looking at and then
@@ -415,11 +418,11 @@ class GASpyPreprocessor(object):
         adsorbates = set(doc['adsorbate'] for doc in docs)
 
         # Calculate the per-atom-energies for each adsorbate type
-        per_atom_energies = {}
+        self.per_atom_energies = {}
         for ads in adsorbates:
             docs_subset = [doc for doc in docs if doc['adsorbate'] == ads]
             # Fitting a linear regressor that uses elemental counts to predict energies.
-            counts = doc_to_counts(docs_subset)
+            counts = self.doc_to_coordcount(docs_subset)
             energies = np.array([doc['energy'] for doc in docs_subset])
             regressor = LinearRegression(fit_intercept=False)
             try:
@@ -431,72 +434,148 @@ class GASpyPreprocessor(object):
             # Pull out the coefficients of the regressor. These coefficients are the
             # "per atom adsorption energy". There is one energy per element, so we store
             # these data in a dictionary.
-            per_atom_energies[ads] = {}
+            self.per_atom_energies[ads] = {}
             n_elements = counts[0].shape[0]
             for i in range(n_elements):
                 # We identify the element corresponding to this elemental index
                 count = np.zeros((1, n_elements))
                 count[0, i] = 1
-                element = lb.inverse_transform(count)[0]
+                element = self.lb.inverse_transform(count)[0]
                 # Then assign the coefficient to the dictionary
-                per_atom_energies[ads][element] = regressor.coef_[i]
-
-        return per_atom_energies
+                self.per_atom_energies[ads][element] = regressor.coef_[i]
 
 
-    def _pooled_coordatoms_chemfp0(self, docs=None):
+    def __chemfp0_site(self, coord, ads, normalize=False, coord_num=1):
         '''
-        Create a preprocessing function to calculate the pooled chemical fingerprints of
-        the substrate atoms that are coordinated with the adsorbate. The chemical fingerprint
-        number 0 (chemfp0) of an atom consists of its per-atom-adsorption-energy, its atomic
-        number, and its Pauling electronegativity. The "pooling" part comes in when we combine
-        the chemfp0 of identical elements (e.g., Cu and Cu) into one vector and append a count.
-        Note that since we have a variable number of features (i.e., coordination atoms), some
-        parts of this vector will not have "valid" values to assign. In these cases, we
-        will use the VNF method published by Davie et al (Kriging atomic properties with
-        a variable number of inputs, J Chem Phys 2016).
+        This method will calculate what we call the "chemical fingerprint number 0"
+        of a site. This fingerprint will be a Nx4 array where N is the number of unique
+        types of elements that are coordinated with the site. The elements in each 1x4
+        vector are the element's per-atom-adsorption-energy, its atomic number, its
+        Pauling electronegativity, and the number of those elements that show up in
+        the coordination. We also sort the 1x4 vectors such that the first 1x4 vector
+        that shows up is the one with the lowest per-atom-adsorption-energy.
 
-        WARNING:  Since per-atom-adsorption-energy depends on the adsorbate, this feature
-        should be exclusive with the `ads` feature. If you want to work with multiple
-        adsorbates, then you should block by adsorbate.
+        Inputs:
+            coord       A list of strings that represent the coordination of the site
+                        you want to fingerprint. For example, a 3-fold copper site would be
+                        ['Cu', 'Cu', 'Cu'].
+            ads         This fingerprit uses a "per-atom-adsorption-energy" (check out the
+                        `__calculate_per_atom_energies` method for more details). Since
+                        these values are adsorbate-specific, you need to tell us what
+                        adsorbate you want to do the fingerprinting with.
+            normalize   A boolean indicating whether you want to divide the elemental counts
+                        by the coordination number.
+            coord_num   An integer representing the coordination number. This is used
+                        only when `normalize == True`.
+        Output:
+            chem_fp     A list of tuples. The length of the list is equal to the number
+                        of elements present in the coordination, and the length of the
+                        tuples is 4. The first value in each tuple is the per-atom-
+                        adsorption-energy; the second value is the atomic number;
+                        the third value is the Pauling electronegativity; and the last
+                        number is the count of that element in the coordination site.
+        '''
+        chem_fp = []
 
-        Example:  Pending
+        # Just... do the calculation
+        for element in set(coord):
+            try:
+                element_data = self.mendeleev_data[element]
+                energy = self.per_atom_energies[ads][element]
+                atomic_number = element_data.atomic_number
+                electronegativity = element_data.electronegativity(scale='pauling')
+                count = coord.count(element)
+                if normalize:
+                    count /= float(coord_num)
+                chem_fp.append((energy, atomic_number, electronegativity, count))
+            # For some silly cases, there are no coordinated atoms. When that
+            # happens, just pass out the dummy fingerprint. Use EAFP just in
+            # case we've never actually calculated the dummy fingerprint yet.
+            except KeyError:
+                try:
+                    chem_fp.append(self.dummy_fps[ads])
+                except AttributeError:
+                    self.__define_dummy_chemfp0()
+                    chem_fp.append(self.dummy_fps[ads])
+
+        return sorted(chem_fp)
+
+
+    def __define_dummy_chemfp0(self, docs=None):
+        '''
+        This method establishes a "dummy" value for the `chemfp0` type of feature.
+        This dummy value is useful when using variable number of features;
+        reference Davie et al (Kriging atomic properties with a variable number of inputs,
+        J Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
 
         Input:
             docs    Mongo json dictionaries. Default value of `None` yields `self.docs`
-        Output:
-            preprocess_cfp0     Function to preprocess mongo docs into a vector of floats
+        Resulting attributes:
+            dummy_fps   A dictionary whose keys are the adsorbate you want a dummy
+                        feature for and whose keys are a tuple (i.e., the chemfp0)
+            max_comp    A dictionary whose keys are the adsorbate you are considering
+                        and whose values are the maximum number of elements present
+                        in any single mpid we are looking at. This is useful for
+                        figuring out how many dummy features you need to add.
         '''
         if not docs:
             docs = copy.deepcopy(self.docs)
 
-        # This coordcount calculator will help us calculate per-atom-energies
-        calc_coordcount, lb = self._coordcount(docs, return_lb=True)
-        # Calculate the per-atom-adsorption-energies for each adsorbate-element pairing.
-        per_atom_energies = self.__calculate_per_atom_energies(docs, calc_coordcount, lb)
+        # This method requires the per-atom-energies. So we call the pertinent method
+        # that will calculate these values and assign them as attributes. We only do this
+        # if it looks like this method has not been called already.
+        if not hasattr(self, 'per_atom_energies'):
+            self.__calculate_per_atom_energies(docs)
 
-        # For each adsorbate type, establish what a "blank" fingerprint would look like
-        # as per the VNF rules. The item that we choose to set as "outside of valid range"
-        # is the count.
-        dummy_fps = {}
-        max_comp = {}
-        for adsorbate, energies_by_element in per_atom_energies.iteritems():
+        # Calculate `dummy_fps`
+        self.dummy_fps = {}
+        self.max_comp = {}
+        for adsorbate, energies_by_element in self.per_atom_energies.iteritems():
             avg_energy = np.average([energy for energy in energies_by_element.values()])
             avg_atomic_num = np.average([self.mendeleev_data[element].atomic_number
                                          for element in energies_by_element.keys()])
             avg_electroneg = np.average([self.mendeleev_data[element].electronegativity(scale='pauling')
                                          for element in energies_by_element.keys()])
             dummy_count = 0
-            dummy_fps[adsorbate] = (avg_energy, avg_atomic_num, avg_electroneg, dummy_count)
-            # Not all of our coordination sites will have the same number of substrate element
-            # types. This means we'll have a variable length of fingerprints. We will address
-            # this by filling any empty spaces, but before that we need to know how many total
-            # spaces there should be. We figure that out here.
+            self.dummy_fps[adsorbate] = (avg_energy, avg_atomic_num, avg_electroneg, dummy_count)
+
+            # Calculate `max_comp`
             mpids_subset = [doc['mpid'] for doc in docs if doc['adsorbate'] == adsorbate]
             compositions = [len(self.compositions_by_mpid[mpid]) for mpid in mpids_subset]
-            max_comp[adsorbate] = max(compositions)
+            self.max_comp[adsorbate] = max(compositions)
 
-        def preprocess_pooled_coordatoms_chemfp0(docs):
+
+    def _coordatoms_chemfp0(self, docs=None):
+        '''
+        Create a preprocessing function to calculate the chemical fingerprints of
+        the substrate atoms that are coordinated with the adsorbate (reference the
+        `__chemfp0_site` method for more details). This feature also uses the VNF
+        methodology (reference the `__define_dummy_chemfp0` method).
+
+        WARNING:  Since per-atom-adsorption-energy depends on the adsorbate, this feature
+        should be exclusive with the `ads` feature. If you want to work with multiple
+        adsorbates, then you should block by adsorbate. Why is it exclusive, you ask?
+        Because I'm too lazy to code it.
+
+        Example:  Pending
+
+        Input:
+            docs    Mongo json dictionaries. Default value of `None` yields `self.docs`
+        Output:
+            preprocess_coord_chemfp0    Function to preprocess mongo docs into a vector of floats
+        '''
+        if not docs:
+            docs = copy.deepcopy(self.docs)
+
+        # We need to calculate the per-atom-energies and also establish some dummy features.
+        # These two methods do this and assign them as attributes. Note the `if-then` that
+        # makes sure we only call these methods if they have not yet been executed.
+        if not hasattr(self, 'per_atom_energies'):
+            self.__calculate_per_atom_energies(docs)
+        if not hasattr(self, 'dummy_pfs'):
+            self.__define_dummy_chemfp0(docs)
+
+        def preprocess_coord_chemfp0(docs):
             # This feature needs to know the adsorbate. Let's make sure that the adsorbate
             # key is there.
             if 'adsorbate' not in docs[0]:
@@ -504,44 +583,109 @@ class GASpyPreprocessor(object):
                     doc['adsorbate'] = doc['adsorbates'][0]
 
             # Package the calculation into a function so that we can possibly parallelize it
-            def calc_pooled_coordatoms_chemfps(doc):  # noqa: E306
-                # We first find both the adsorbate and the binding atoms, which we need
-                # to do the chemical fingerprinting
+            def calc_coordatoms_chemfps(doc):  # noqa: E306
+                # We first find both the adsorbate and the binding atoms, which we then
+                # use to do the chemical fingerprinting
                 adsorbate = doc['adsorbate']
                 binding_atoms = doc['coordination'].split('-')
-                # Fingerprint each type of element that's present in the set of coordinated atoms
-                elemental_fps = []
-                for element in set(binding_atoms):
-                    element_data = self.mendeleev_data[element]
-                    energy = per_atom_energies[adsorbate][element]
-                    atomic_number = element_data.atomic_number
-                    electronegativity = element_data.electronegativity(scale='pauling')
-                    count = binding_atoms.count(element)
-                    elemental_fps.append((energy, atomic_number, electronegativity, count))
-                # Now we sort the fingerprints. The per-atom-adsorption-energy is first in
-                # the tuple of fingerprints, so that's what Python will sort on (from
-                # lowest to highest)
-                return sorted(elemental_fps)
+                elemental_fps = self.__chemfp0_site(binding_atoms, adsorbate)
+                return elemental_fps
             # Put the function through a comprehension. We don't necessarily need to do it this
             # way, but it'll be easy to multithread it later if we decide to do so.
-            sparse_elemental_fps = [calc_pooled_coordatoms_chemfps(doc) for doc in docs]
+            sparse_elemental_fps = [calc_coordatoms_chemfps(doc) for doc in docs]
 
             # Fill in the dummy features here
             chem_fps = []
             for doc, sparse_elemental_fp in zip(docs, sparse_elemental_fps):
                 ads = doc['adsorbate']
                 chem_fp = []
-                for i in range(max_comp[ads]):
+                for i in range(self.max_comp[ads]):
                     # EAFP to fill in the real fingerprints first and then the dummy ones
                     try:
                         chem_fp.append(sparse_elemental_fp[i])
                     except IndexError:
-                        chem_fp.append(dummy_fps[ads])
+                        chem_fp.append(self.dummy_fps[ads])
                 site_fp = np.array(chem_fp).flatten()
                 chem_fps.append(site_fp)
             return np.array(chem_fps)
 
-        return preprocess_pooled_coordatoms_chemfp0
+        return preprocess_coord_chemfp0
+
+
+    def _neighbors_chemfp0(self, docs=None):
+        '''
+        Create a preprocessing function to calculate the chemical fingerprints of the
+        second-shell atoms, i.e., the ones bonded to the coordination atoms (reference
+        the `__chemfp0_site` method for more details). This feature also uses the VNF
+        methodology (reference the `__define_dummy_chemfp0` method). Note that this specific
+        incarnation of chemfp0 has two subtle nuances:  1) for ease-of-programming reasons,
+        we end up multi-counting neighbors that are bonded to more than one coordinated atom,
+        and 2) we divide each elemental count by the coordination number of the adsorbate.
+
+        WARNING:  Since per-atom-adsorption-energy depends on the adsorbate, this feature
+        should be exclusive with the `ads` feature. If you want to work with multiple
+        adsorbates, then you should block by adsorbate. Why is it exclusive, you ask?
+        Because I'm too lazy to code it.
+
+        Example:  Pending
+
+        Input:
+            docs    Mongo json dictionaries. Default value of `None` yields `self.docs`
+        Output:
+            preprocess_neighbor_chemfp0  Function to preprocess mongo docs into a vector of floats
+        '''
+        if not docs:
+            docs = copy.deepcopy(self.docs)
+
+        # We need to calculate the per-atom-energies and also establish some dummy features.
+        # These two methods do this and assign them as attributes. Note the `if-then` that
+        # makes sure we only call these methods if they have not yet been executed.
+        if not hasattr(self, 'per_atom_energies'):
+            self.__calculate_per_atom_energies(docs)
+        if not hasattr(self, 'dummy_pfs'):
+            self.__define_dummy_chemfp0(docs)
+
+        def preprocess_neighbor_chemfp0(docs):
+            # This feature needs to know the adsorbate. Let's make sure that the adsorbate
+            # key is there.
+            if 'adsorbate' not in docs[0]:
+                for doc in docs:
+                    doc['adsorbate'] = doc['adsorbates'][0]
+
+            # Package the calculation into a function so that we can possibly parallelize it
+            def calc_coordatoms_chemfps(doc):  # noqa: E306
+                # We first find the adsorbate, the coordination number, and
+                # all of the neighbors.
+                adsorbate = doc['adsorbate']
+                coord_num = len(doc['coordination'].split('-'))
+                all_neighbors = []
+                for coord_string in doc['neighborcoord']:
+                    binding_atom, neighbors = coord_string.split(':')
+                    all_neighbors.extend(neighbors.split('-'))
+                # Calculate the chemical fingerprint
+                elemental_fps = self.__chemfp0_site(all_neighbors, adsorbate,
+                                                    normalize=True, coord_num=coord_num)
+                return elemental_fps
+            # Put the function through a comprehension. We don't necessarily need to do it this
+            # way, but it'll be easy to multithread it later if we decide to do so.
+            sparse_elemental_fps = [calc_coordatoms_chemfps(doc) for doc in docs]
+
+            # Fill in the dummy features here
+            chem_fps = []
+            for doc, sparse_elemental_fp in zip(docs, sparse_elemental_fps):
+                ads = doc['adsorbate']
+                chem_fp = []
+                for i in range(self.max_comp[ads]):
+                    # EAFP to fill in the real fingerprints first and then the dummy ones
+                    try:
+                        chem_fp.append(sparse_elemental_fp[i])
+                    except IndexError:
+                        chem_fp.append(self.dummy_fps[ads])
+                site_fp = np.array(chem_fp).flatten()
+                chem_fps.append(site_fp)
+            return np.array(chem_fps)
+
+        return preprocess_neighbor_chemfp0
 
 
     def _hash(self, docs=None, excluded_fingerprints='default'):
