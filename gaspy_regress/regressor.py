@@ -11,8 +11,8 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 import pdb  # noqa:  F401
 import itertools
+from collections import defaultdict
 import copy
-import math
 import warnings
 import numpy as np
 from sklearn import metrics
@@ -29,21 +29,12 @@ class GASpyRegressor(object):
     '''
     All of the `fit_*` methods have similar output structures. Here it is:
 
-    Outputs:
-        rmses       A nested dictionary whose first set of keys are the block---(None,) if there
-                    is no blocking. The second set of keys are the split data set
-                    (e.g., 'train', 'test', or 'all data'. The values of the sub-dictionary
-                    are the root-mean-squared-error of the model for the corresponding block
-                    and dataset.
-        errors      The same as `rmses`, but it returns an np.array of errors instead of a
-                    float of RMSE values.
     Resulting attributes:
         model_name  A string indicating the name of the method used. This is useful for
                     labeling the plots in the `parity_plot` method.
-        rmses       A nested dictionary with the following structure:
-                    rmses = {'block': {'split_data_set': RMSE}}
-        errors      The same thing as `rmses`, but instead of RMSE values, they're
-                    np.arrays of the errors
+        residuals   A nested dictionary with the following structure:
+                    residuals = {'block': {'split_data_set': resids}} where
+                    `resids` is a np.array of model residuals
         _predict    A function that can turn turn a preprocessed input into a prediction.
                     Inputs:
                         inputs  A numpy array. 1st dimension shows different data points,
@@ -426,13 +417,11 @@ class GASpyRegressor(object):
 
         # Initialize the outputs
         models = dict.fromkeys(blocks)
-        rmses = dict.fromkeys(blocks)
-        errors = dict.fromkeys(blocks)
+        residuals = dict.fromkeys(blocks)
 
         for block in blocks:
             # Initialize some more structuring for the outputs
-            rmses[block] = dict.fromkeys(x_dict[block])
-            errors[block] = dict.fromkeys(x_dict[block])
+            residuals[block] = dict.fromkeys(x_dict[block])
             # Copy the regressor template and perform the regression
             models[block] = copy.deepcopy(regressor)
             models[block].fit(x_dict[block]['train'], y_dict[block]['train'])
@@ -441,9 +430,7 @@ class GASpyRegressor(object):
             # all data
             for dataset, y in y_dict[block].iteritems():
                 y_hat = models[block].predict(x_dict[block][dataset])
-                mse = metrics.mean_squared_error(y, y_hat)
-                rmses[block][dataset] = math.sqrt(mse)
-                errors[block][dataset] = y - y_hat
+                residuals[block][dataset] = y - y_hat
 
         # Create the model
         def _predict(docs, block=(None,), layer='outer'):
@@ -463,8 +450,7 @@ class GASpyRegressor(object):
 
         # Assign the attributes
         self._predict = _predict
-        self.rmses = rmses
-        self.errors = errors
+        self.residuals = residuals
         self.models = models
 
 
@@ -498,13 +484,11 @@ class GASpyRegressor(object):
 
         # Initialize the outputs
         models = dict.fromkeys(blocks)
-        rmses = dict.fromkeys(blocks)
-        errors = dict.fromkeys(blocks)
+        residuals = dict.fromkeys(blocks)
 
         for block in blocks:
             # Initialize some more structuring for the outputs
-            rmses[block] = dict.fromkeys(x_dict[block])
-            errors[block] = dict.fromkeys(x_dict[block])
+            residuals[block] = dict.fromkeys(x_dict[block])
             # Copy the regressor template and perform the regression
             models[block] = copy.deepcopy(regressor)
             models[block].fit(x_dict[block]['train'], y_dict[block]['train'])
@@ -516,9 +500,7 @@ class GASpyRegressor(object):
             # all data
             for dataset, y in y_dict[block].iteritems():
                 y_hat = models[block].predict(x_dict[block][dataset])
-                mse = metrics.mean_squared_error(y, y_hat)
-                rmses[block][dataset] = math.sqrt(mse)
-                errors[block][dataset] = y - y_hat
+                residuals[block][dataset] = y - y_hat
 
         # Create the model
         def _predict(docs, block=(None,), layer='outer'):
@@ -538,8 +520,7 @@ class GASpyRegressor(object):
 
         # Assign the attributes
         self._predict = _predict
-        self.rmses = rmses
-        self.errors = errors
+        self.residuals = residuals
         self.models = models
 
 
@@ -576,8 +557,7 @@ class GASpyRegressor(object):
             self.x_inner = copy.deepcopy(self.x)
             self.pp_inner = copy.deepcopy(self.pp)  # noqa: E501
             self._predict_inner = copy.deepcopy(self._predict)
-            self.rmses_inner = copy.deepcopy(self.rmses)
-            self.errors_inner = copy.deepcopy(self.errors)
+            self.residuals_inner = copy.deepcopy(self.residuals)
             self.models_inner = copy.deepcopy(self.models)
         except AttributeError:
             raise AttributeError('You tried to fit an outer model without fitting an inner model')
@@ -601,7 +581,7 @@ class GASpyRegressor(object):
         self.pp = pp
 
         # Execute the outer regression
-        getattr(self, outer_method)(outer_regressor, x_dict=x, y_dict=self.errors_inner,
+        getattr(self, outer_method)(outer_regressor, x_dict=x, y_dict=self.residuals_inner,
                                     blocks=blocks, model_name=model_name)
         # Appropriately store the new function that we just made
         self._predict_outer = copy.deepcopy(self._predict)
@@ -662,9 +642,42 @@ class GASpyRegressor(object):
         return np.concatenate(predictions, axis=0).flatten()
 
 
-    def parity_plot(self, split=False, jupyter=True, plotter='plotly',
-                    xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
-                    fname='parity.pdf', s=None, font=None):
+    def print_performance_metric(self, metric='rmse'):
+        '''
+        Calculate and report the performance metrics of the fitted model.
+
+        Inputs:
+            metric  A string indicating which performance metric you want plotted.
+                    Can be 'rmse' or 'mae'.
+        '''
+        try:
+            # Calculate and print the performance metrics for each block of data
+            metric_values = defaultdict(dict)
+            for block, _residuals in self.residuals.iteritems():
+                for dataset, __residuals in _residuals.iteritems():
+                    # Here are the different metrics we're able to calculate now
+                    if metric in set(['rmse', 'RMSE']):
+                        y = np.zeros(__residuals.shape)
+                        y_hat = __residuals
+                        metric_values[block][dataset] = np.sqrt(metrics.mean_squared_error(y, y_hat))
+                    elif metric in set(['mae', 'MAE']):
+                        y = np.zeros(__residuals.shape)
+                        y_hat = __residuals
+                        metric_values[block][dataset] = metrics.mean_absolute_error(y, y_hat)
+                    else:
+                        raise SyntaxError('"%s" is not a valid argument for "metric"' % metric)
+            print('%s values:' % metric)
+            utils.print_dict(metric_values, indent=1)
+
+        # Tell the user what they probably did wrong
+        except AttributeError as error:
+            error.args = (error.args[0] + '; you probably just tried to print metrics before doing a fit')
+            raise error
+
+
+    def parity_plot(self, split=False, jupyter=True,
+                    plotter='plotly', xlabel=None, ylabel=None, title=None, lims=None,
+                    shift=0., fname='parity.pdf', s=None, font=None):
         '''
         Create a parity plot of the model that's been fit.
 
@@ -710,12 +723,8 @@ class GASpyRegressor(object):
             ylabel = 'Regressed %s' % tuple(self.responses)
         if not font:
             font = {'family': 'sans', 'style': 'normal', 'size': 20}
-
-        print('RMSE values:')
-        utils.print_dict(self.rmses, indent=1)
-
         if not self.x:
-            raise Exception('Trying to plot without performing a fit first.')
+            raise RuntimeError('Trying to plot without performing a fit first.')
 
         # Initialize the outputs
         y_out = {}
@@ -724,7 +733,7 @@ class GASpyRegressor(object):
 
         traces = []
         # Make a plotly trace for each block & dataset
-        for block in self.errors:
+        for block in self.residuals:
             # Define the data sets we want to plot via the `split` argument.
             if split:
                 datasets = self.x[(None,)].keys()
@@ -738,9 +747,9 @@ class GASpyRegressor(object):
                 # Unpack data from the class attributes
                 y = self.y[block][dataset]
                 docs = self.docs[block][dataset]
-                errors = self.errors[block][dataset]
+                residuals = self.residuals[block][dataset]
                 # Calculate the model's prediction
-                y_hat = y - errors
+                y_hat = y - residuals
                 # Perform the shifting
                 y = y + shift
                 y_hat = y_hat + shift
