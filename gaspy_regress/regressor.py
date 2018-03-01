@@ -77,6 +77,7 @@ class GASpyRegressor(object):
                         gaspy_regress.preprocessor module for more details.
             kwargs      Any arguments you want to pass to the dimesionality
                         reducer.
+
         Inputs (pulling/filtering options):
             fingerprints        Mongo queries of parameters that you want pulled.
                                 Note that we automatically set some of these queries
@@ -100,6 +101,7 @@ class GASpyRegressor(object):
                                 when it is relaxed without an adsorbate (angstrom)
             slab_move_max       The maximum distance that a slab atom may move
                                 (angstrom)
+
         Inputs (data splitting options):
             train_size  A float between 0 and 1 indicating the fraction of your
                         data you want to allocate for training/development. If
@@ -119,6 +121,7 @@ class GASpyRegressor(object):
                         cross-validation.
             n_bins      A positive integer for how many bins you want to use to stratify the root
                         train/test split. This is ignored if train_size == 1. Defaults to 20
+
         Resulting attributes:
             features        Same thing as the input. Used mainly for making file_name to save
             responses       Same thing as the input. Used mainly for making file_name to save
@@ -678,9 +681,9 @@ class GASpyRegressor(object):
             raise error
 
 
-    def parity_plot(self, split=False, jupyter=True,
-                    plotter='plotly', xlabel=None, ylabel=None, title=None, lims=None,
-                    shift=0., fname='parity.pdf', s=None, font=None):
+    def parity_plot(self, split=False, jupyter=True, plotter='plotly',
+                    xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
+                    fname='parity.pdf', figsize=None, s=None, alpha=0.4, font=None):
         '''
         Create a parity plot of the model that's been fit.
 
@@ -701,12 +704,17 @@ class GASpyRegressor(object):
             shift   A float indicating how far you want to shift the energy values.
                     This is useful for when you are adding entropic contributions
                     to zero point energies.
+            figsize A 2-tuple indicating the size of the panel. Defaults to (15, 15).
+                    Only works when plotter == 'matplotlib'.
             fname   A string indicating the file name you want to save the figure as.
                     Only works when plotter == 'matplotlib'
             s       An integer (or float?) indicating the size of the marker you
                     want to use. Only works when plotter == 'matplotlib'
+            alpha   A float between 0 and 1 indicating the transparency you want
+                    in the data. 0 is totally transparent and 1 is opaque.
+                    Only works when plotter == 'matplotlib'.
             font    A dictionary that matplotlib accepts to establish the fonts you
-                    want to use. Only w orks when plotter == 'matplotlib'
+                    want to use. Only works when plotter == 'matplotlib'
         Outputs:
             x       The values of the x-axis that you plot
             y       The values of the y-axis that you plot
@@ -718,6 +726,8 @@ class GASpyRegressor(object):
         # Establish defaults
         if not title:
             title = 'Predicting %s using a[n] %s model' % (tuple(self.responses), self.model_name)
+        if not figsize:
+            figsize = (15, 15)
         if not lims:
             lims = [-4, 6]
         if not xlabel:
@@ -770,7 +780,8 @@ class GASpyRegressor(object):
                                              text=text))
                     text_out[(block, dataset)] = text
                 elif plotter == 'matplotlib':
-                    plt.scatter(y, y_hat, s=s)
+                    plt.figure(figsize=figsize)
+                    plt.scatter(y, y_hat, s=s, alpha=alpha)
                 else:
                     raise Exception('"%s" is an unrecognized argument for "plotter"', plotter)
                 # Add the information to the output to return
@@ -802,3 +813,87 @@ class GASpyRegressor(object):
 
         # Return the data in case the user wants to do something with it
         return y_out, y_hat_out, text_out
+
+
+    def residual_plot(self, figsize=None, xlims=None, xticks=None, xlabel='Residuals', font_scale=2):
+        '''
+        Create a panel of historgrams of the model residuals.
+
+        Inputs:
+            figsize     A 2-tuple indicating the size of the panel. Defaults to (15, 15)
+            xlims       A 2-element sequence indicating the limits you want to put in for all
+                        the x-axes on the histograms. Defaults to -1 and 1.
+            xticks      A list for the locations you want x-axis tick points at. Defaults to
+                        [-1, 0, 1].
+            xlabel      String indicating the x-axis label you want to put on the entire panel
+            font_scale  Integer (or float?) indicating the scale of the font you want to use.
+        '''
+        # We import seaborn in the method instead of in the module so that it doesn't
+        # interefere with some of the other matplotlib things we have going on here.
+        import seaborn as sns
+
+        # Set defaults
+        if not figsize:
+            figsize = (15, 15)
+        if not xlims:
+            xlims = (-0.4, 0.4)
+        if not xticks:
+            xticks = range(-1, 1)
+        if not xlabel:
+            xlabel = 'Residuals'
+
+        # Pull out the residuals
+        try:
+            residuals = self.residuals
+        except AttributeError as error:
+            error.args = (error.args[0] + '; you probably just tried to show residuals before doing a fit')
+            raise error
+
+        # Figure out the dimensions of the subplot, then create it
+        blocks = residuals.keys()
+        datasets = residuals.values()[0].keys()
+        n_blocks = len(blocks)
+        n_datasets = len(datasets)
+        fig, axes = plt.subplots(nrows=n_datasets, ncols=n_blocks, figsize=figsize)
+
+        # Create each of the subplots
+        for i, (block, _residuals) in enumerate(residuals.iteritems()):
+            for j, (dataset, __residuals) in enumerate(_residuals.iteritems()):
+                # Get the axis object for this subplot. Use EAFP to deal with
+                # situations where we only have one row or one column
+                try:
+                    ax = axes[j, i]
+                except IndexError:
+                    ax = axes[max((i, j))]
+                # Make the plot and format it
+                sns.distplot(__residuals, kde=False, ax=ax)
+                ax.set_xlim(*xlims)
+                ax.set_xticks(xticks)
+                ax.set_yticks([])
+
+        # Label the blocks and datasets if we have an array of panels
+        if n_blocks > 1 and n_datasets > 1:
+            for ax, block in zip(axes[0], residuals.keys()):
+                ax.set_title(block)
+            if n_datasets > 1:
+                for ax, dataset in zip(axes[:, 0], residuals.values()[0].keys()):
+                    ax.set_ylabel(dataset, size='large')
+        # If we only have multiple datasets, then label accordingly
+        elif n_datasets > 1:
+            for ax, dataset in zip(axes, residuals.values()[0].keys()):
+                ax.set_ylabel(dataset, size='large')
+        # If we only have multiple blocks, then label accordingly
+        elif n_blocks > 1:
+            for ax, block in zip(axes, residuals.keys()):
+                ax.set_title(block)
+
+        # Label the x-axis for the entire subplot array
+        fig.add_subplot(111, frameon=False)
+        plt.tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
+        plt.grid(False)
+        plt.xlabel(xlabel)
+
+        # Show it
+        sns.set(font_scale=font_scale)
+        fig.tight_layout()
+        plt.show()
