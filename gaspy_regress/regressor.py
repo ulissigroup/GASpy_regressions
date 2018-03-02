@@ -271,7 +271,7 @@ class GASpyRegressor(object):
             if dev_size:
                 dev_size = dev_size/train_size
                 y_train, y_dev, x_train, x_dev, docs_train, docs_dev = \
-                    self._stratified_split(n_bins, dev_size, random_state,
+                    self._stratified_split(n_bins, 1-dev_size, random_state,
                                            y_train, x_train, docs_train)
                 self.x[(None,)]['dev'] = x_dev
                 self.y[(None,)]['dev'] = y_dev
