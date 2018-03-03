@@ -19,3 +19,7 @@
 
 # The cache
 /cache/*
+
+# We'll probably be making a lot of things in the notebook folder.
+# Let's keep track of them only when they're added.
+/notebooks/*
