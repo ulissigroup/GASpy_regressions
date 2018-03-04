@@ -146,7 +146,7 @@ def __concatenate_model_name(model_name, features, responses, blocks):
     '''
     # Find the location of the repo to define the location of the pickle folder
     rc = utils.read_rc()
-    cache_path = rc['gaspy_path'] + '/GASpy_regressions/cache/'
+    cache_path = rc['gaspy_path'] + '/GASpy_regressions/cache/models/'
 
     # Turn the attributes into strings
     feature_names = 'FEATURES_' + '_'.join(features)
@@ -170,8 +170,8 @@ def __concatenate_prediction_name(model_name, features, responses, blocks, syste
     # We're really just piggy-backing off of a different __concatenate function, but adding
     # a little more information to the front of the file name
     file_path = __concatenate_model_name(model_name, features, responses, blocks)
-    cache_path, file_name = file_path.split('cache/')
-    fname = cache_path + 'cache/' + system + '_predictions_' + file_name
+    cache_path, file_name = file_path.split('models/')
+    fname = cache_path + 'predictions/' + system + '_predictions_' + file_name
 
     return fname
 

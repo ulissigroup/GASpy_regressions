@@ -13,6 +13,7 @@ import json
 import numpy as np
 import pandas as pd
 import tqdm
+from sklearn import metrics
 from gaspy import utils, gasdb, defaults   # noqa: E402
 
 
@@ -117,7 +118,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         features = regressor.features + regressor.features_inner
     except AttributeError:
         features = regressor.features
-    if 'ads' in features or 'pooled_coordatoms_chemfp0' in features:
+    if 'ads' in features or 'coordatoms_chemfp0' in features or 'neighbors_chemfp0' in features:
         for doc in cat_docs:
             doc['adsorbate'] = adsorbate
     # Create the regressor's estimations
@@ -149,6 +150,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     all_docs = ads_docs + unsim_cat_docs
     for doc in all_docs:
         doc['mongo_id'] = str(doc['mongo_id'])
+        doc['energy'] = float(doc['energy'])
     toc = time.time()
     print('It took %i seconds to add the extra tags' % (toc-tic))
 
@@ -157,7 +159,7 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         print('Saving all of the estimates...')
         tic = time.time()
         gaspy_path = utils.read_rc('gaspy_path')
-        save_folder = gaspy_path + '/GASpy_regressions/cache/'
+        save_folder = gaspy_path + '/GASpy_regressions/cache/predictions/'
         with open(save_folder + 'all_estimates_for_%s.json' % adsorbate, 'w') as f:
             json.dump(all_docs, f)
         toc = time.time()
@@ -203,7 +205,9 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
     print('Starting data packaging...')
     tic = time.time()
     sim_u = 0.1  # simulation uncertainty
-    model_u = regressor.rmses[regressor_block]['train']  # model uncertainty
+    residuals = regressor.residuals[regressor_block]['all']
+    baseline = np.zeros(residuals.shape)
+    model_u = np.sqrt(metrics.mean_squared_error(baseline, residuals))  # model uncertainty
     est_u = np.sqrt(sim_u**2 + model_u**2)  # total uncertainty of surrogate model
     ads_dE_u = [sim_u]*len(ads_dE)
     ads_y_u = [0.]*len(ads_y)
