@@ -21,6 +21,7 @@ from plotly.offline import init_notebook_mode, iplot
 import plotly.graph_objs as go
 import matplotlib
 from matplotlib import pyplot as plt
+import seaborn as sns
 from .preprocessor import GASpyPreprocessor
 from gaspy import utils, gasdb
 
@@ -776,6 +777,7 @@ class GASpyRegressor(object):
                 elif plotter == 'matplotlib':
                     plt.scatter(y, y_hat, s=s, alpha=alpha,
                                 label='%s data of %s block' % (dataset, block))
+                    sns.set_style('white')
                 else:
                     raise Exception('"%s" is an unrecognized argument for "plotter"', plotter)
                 # Add the information to the output to return
@@ -822,10 +824,6 @@ class GASpyRegressor(object):
             xlabel      String indicating the x-axis label you want to put on the entire panel
             font_scale  Integer (or float?) indicating the scale of the font you want to use.
         '''
-        # We import seaborn in the method instead of in the module so that it doesn't
-        # interefere with some of the other matplotlib things we have going on here.
-        import seaborn as sns
-
         # Set defaults
         if not figsize:
             figsize = (15, 15)
