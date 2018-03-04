@@ -153,11 +153,13 @@ def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title
         pred_trimmed = np.array(pred_trimmed)
         est_trimmed = np.array(est_trimmed)
         # Now plot
-        g = sns.jointplot(pred_trimmed, est_trimmed, kind='hex', space=0, stat_func=None,
-                          gridsize=grid_size, color=color)
-        g.set_axis_labels(x_label, y_label)
-        plt.tight_layout()
+        grid = sns.jointplot(pred_trimmed, est_trimmed, kind='hex', space=0, stat_func=None,
+                             gridsize=grid_size, color=color)
+        grid.set_axis_labels(x_label, y_label)
+        # Add a parity line
+        grid.ax_joint.plot(plot_range, plot_range, 'k--')
         # Save & display
+        plt.tight_layout()
         if save:
             plt.savefig(save_name, bbox_inches='tight', dpi=save_dpi)
         plt.show()
