@@ -16,10 +16,3 @@
 
 # The Google credentials for the cloud files that we'll be interfacing with
 .gdrive_credentials.json
-
-# The cache
-/cache/*
-
-# We'll probably be making a lot of things in the notebook folder.
-# Let's keep track of them only when they're added.
-/notebooks/*
