@@ -642,14 +642,13 @@ class GASpyPreprocessor(object):
                 # We first find the adsorbate, the coordination number, and
                 # all of the neighbors.
                 adsorbate = doc['adsorbate']
-                coord_num = len(doc['coordination'].split('-'))
+                # coord_num = len(doc['coordination'].split('-'))
                 all_neighbors = []
                 for coord_string in doc['neighborcoord']:
                     binding_atom, neighbors = coord_string.split(':')
                     all_neighbors.extend(neighbors.split('-'))
                 # Calculate the chemical fingerprint
-                elemental_fps = self.__chemfp0_site(all_neighbors, adsorbate,
-                                                    normalize=True, coord_num=coord_num)
+                elemental_fps = self.__chemfp0_site(all_neighbors, adsorbate)
                 return elemental_fps
             # Put the function through a comprehension. We don't necessarily need to do it this
             # way, but it'll be easy to multithread it later if we decide to do so.
