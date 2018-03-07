@@ -12,7 +12,6 @@ from collections import OrderedDict
 import numpy as np
 import tqdm
 from sklearn import preprocessing, decomposition
-from sklearn.linear_model import LinearRegression
 import mendeleev
 from pymatgen.matproj.rest import MPRester
 from gaspy.utils import read_rc
@@ -375,34 +374,22 @@ class GASpyPreprocessor(object):
             self.mendeleev_data[el] = getattr(mendeleev, el)
 
 
-    def __calculate_per_atom_energies(self, docs):
+    def __calculate_median_adsorption_energies(self, docs):
         '''
-        This method uses pure-metal adsorption data to calculate the average adsorption
-        energy per binding atom. For example:  If the average CO binding energy on Cu
-        is -0.24 eV for on-top sites, -0.51 eV for bridge sites, and -0.74 eV for
-        3-fold sites, and -1.01 eV for 4-fold sites, then the average adsorption
-        energy per binding atom for Cu would be -0.25 eV.
+        This method uses pure-metal adsorption data to calculate the median adsorption
 
         Inputs:
             docs    Mongo json dictionaries.
         Resulting attributes:
-            doc_to_coordcount       A function that converts a mongo document of a site
-                                    into a coordcount
-            lb                      A fitted SKLearn label binarizer that can transform
-                                    a coordination into a binary vector (or vice versa)
-            compositions_by_mpid    A dictionary whose keys are mpid and whose values
-                                    are lists of strings for each element in that MPID
-            per_atom_energies       A nested dictionary whose keys are the adsorbates that
-                                    you want the energies for. The values are dictionaries
-                                    whose keys are the substate elements found in `docs`
-                                    and whose values are the average per-atom
-                                    adsorption energy for that element.
+            compositions_by_mpid        A dictionary whose keys are mpid and whose values
+                                        are lists of strings for each element in that MPID
+            median_adsorption_energies  A nested dictionary whose keys are the adsorbates that
+                                        you want the energies for. The values are dictionaries
+                                        whose keys are the substate elements found in `docs`
+                                        and whose values are the median adsorption energy
+                                        for that element.
         '''
         docs = copy.deepcopy(docs)
-
-        # This coordcount calculator and label binarizer
-        # will help us calculate per-atom-energies
-        self.doc_to_coordcount, self.lb = self._coordcount(docs, return_lb=True)
 
         # Filter the documents to include only pure metals. We do this by first
         # finding compositions of all of the mpid's we're looking at and then
@@ -419,28 +406,25 @@ class GASpyPreprocessor(object):
         # Now find all of the unique adsorbates that we've done pure metal calculations for.
         adsorbates = set(doc['adsorbate'] for doc in docs)
 
-        # Calculate the per-atom-energies for each adsorbate type
-        self.per_atom_energies = {}
+        # For each adsorbate, find the elements we've done calculations for
+        self.median_adsorption_energies = {}
         for ads in adsorbates:
             docs_subset = [doc for doc in docs if doc['adsorbate'] == ads]
-            # Fitting a linear regressor that uses elemental counts to predict energies.
-            counts = self.doc_to_coordcount(docs_subset)
-            energies = np.array([doc['energy'] for doc in docs_subset])
-            regressor = LinearRegression(fit_intercept=False)
-            regressor.fit(counts, energies)
+            elements = set([self.compositions_by_mpid[doc['mpid']][0] for doc in docs])
 
-            # Pull out the coefficients of the regressor. These coefficients are the
-            # "per atom adsorption energy". There is one energy per element, so we store
-            # these data in a dictionary.
-            self.per_atom_energies[ads] = {}
-            n_elements = counts[0].shape[0]
-            for i in range(n_elements):
-                # We identify the element corresponding to this elemental index
-                count = np.zeros((1, n_elements))
-                count[0, i] = 1
-                element = self.lb.inverse_transform(count)[0]
-                # Then assign the coefficient to the dictionary
-                self.per_atom_energies[ads][element] = regressor.coef_[i]
+            # Calculate and store the median adsorption energy
+            # for each adsorbate-element pairing
+            self.median_adsorption_energies[ads] = {}
+            for el in elements:
+                energies = [doc['energy'] for doc in docs_subset
+                            if self.compositions_by_mpid[doc['mpid']][0] == el]
+                median = np.median(energies)
+                # Sometimes our data is sparse and yields no energies to take medians on.
+                # When this happens, just take the median of all elements.
+                if np.isnan(median):
+                    energies = [doc['energy'] for doc in docs_subset]
+                    median = np.median(energies)
+                self.median_adsorption_energies[ads][el] = median
 
 
     def __chemfp0_site(self, coord, ads, normalize=False, coord_num=1):
@@ -448,17 +432,17 @@ class GASpyPreprocessor(object):
         This method will calculate what we call the "chemical fingerprint number 0"
         of a site. This fingerprint will be a Nx4 array where N is the number of unique
         types of elements that are coordinated with the site. The elements in each 1x4
-        vector are the element's per-atom-adsorption-energy, its atomic number, its
+        vector are the element's median adsorption energy, its atomic number, its
         Pauling electronegativity, and the number of those elements that show up in
         the coordination. We also sort the 1x4 vectors such that the first 1x4 vector
-        that shows up is the one with the lowest per-atom-adsorption-energy.
+        that shows up is the one with the lowest median adsorption energy.
 
         Inputs:
             coord       A list of strings that represent the coordination of the site
                         you want to fingerprint. For example, a 3-fold copper site would be
                         ['Cu', 'Cu', 'Cu'].
-            ads         This fingerprit uses a "per-atom-adsorption-energy" (check out the
-                        `__calculate_per_atom_energies` method for more details). Since
+            ads         This fingerprit uses a "median adsorption energy" (check out the
+                        `__calculate_median_adsorption_energies` method for more details). Since
                         these values are adsorbate-specific, you need to tell us what
                         adsorbate you want to do the fingerprinting with.
             normalize   A boolean indicating whether you want to divide the elemental counts
@@ -468,8 +452,8 @@ class GASpyPreprocessor(object):
         Output:
             chem_fp     A list of tuples. The length of the list is equal to the number
                         of elements present in the coordination, and the length of the
-                        tuples is 4. The first value in each tuple is the per-atom-
-                        adsorption-energy; the second value is the atomic number;
+                        tuples is 4. The first value in each tuple is the median
+                        adsorption energy; the second value is the atomic number;
                         the third value is the Pauling electronegativity; and the last
                         number is the count of that element in the coordination site.
         '''
@@ -479,7 +463,7 @@ class GASpyPreprocessor(object):
         for element in set(coord):
             try:
                 element_data = self.mendeleev_data[element]
-                energy = self.per_atom_energies[ads][element]
+                energy = self.median_adsorption_energies[ads][element]
                 atomic_number = element_data.atomic_number
                 electronegativity = element_data.electronegativity(scale='pauling')
                 count = coord.count(element)
@@ -519,19 +503,19 @@ class GASpyPreprocessor(object):
         if not docs:
             docs = copy.deepcopy(self.docs)
 
-        # This method requires the per-atom-energies. So we call the pertinent method
+        # This method requires the median adsorption energy we call the pertinent method
         # that will calculate these values and assign them as attributes. We only do this
         # if it looks like this method has not been called already. Then do the same
         # for Mendeleev data.
-        if not hasattr(self, 'per_atom_energies'):
-            self.__calculate_per_atom_energies(docs)
-        if not hasattr(self, 'mendelee_data'):
+        if not hasattr(self, 'median_adsorption_energies'):
+            self.__calculate_median_adsorption_energies(docs)
+        if not hasattr(self, 'mendeleev_data'):
             self.__pull_mendeleev_data(docs)
 
         # Calculate `dummy_fps`
         self.dummy_fps = {}
         self.max_comp = {}
-        for adsorbate, energies_by_element in self.per_atom_energies.iteritems():
+        for adsorbate, energies_by_element in self.median_adsorption_energies.iteritems():
             avg_energy = np.average([energy for energy in energies_by_element.values()])
             avg_atomic_num = np.average([self.mendeleev_data[element].atomic_number
                                          for element in energies_by_element.keys()])
@@ -553,7 +537,7 @@ class GASpyPreprocessor(object):
         `__chemfp0_site` method for more details). This feature also uses the VNF
         methodology (reference the `__define_dummy_chemfp0` method).
 
-        WARNING:  Since per-atom-adsorption-energy depends on the adsorbate, this feature
+        WARNING:  Since median adsorption energy depends on the adsorbate, this feature
         should be exclusive with the `ads` feature. If you want to work with multiple
         adsorbates, then you should block by adsorbate. Why is it exclusive, you ask?
         Because I'm too lazy to code it.
@@ -568,13 +552,13 @@ class GASpyPreprocessor(object):
         if not docs:
             docs = copy.deepcopy(self.docs)
 
-        # We need to calculate the per-atom-energies and also establish some dummy features.
+        # We need to calculate the median adsorption energies and also establish some dummy features.
         # These two methods do this and assign them as attributes. Note the `if-then` that
         # makes sure we only call these methods if they have not yet been executed.
         if not hasattr(self, 'dummy_pfs'):
             self.__define_dummy_chemfp0(docs)
-        if not hasattr(self, 'per_atom_energies'):
-            self.__calculate_per_atom_energies(docs)
+        if not hasattr(self, 'median_adsorption_energies'):
+            self.__calculate_median_adsorption_energies(docs)
 
         def preprocess_coord_chemfp0(docs):
             # This feature needs to know the adsorbate. Let's make sure that the adsorbate
@@ -623,7 +607,7 @@ class GASpyPreprocessor(object):
         we end up multi-counting neighbors that are bonded to more than one coordinated atom,
         and 2) we divide each elemental count by the coordination number of the adsorbate.
 
-        WARNING:  Since per-atom-adsorption-energy depends on the adsorbate, this feature
+        WARNING:  Since median adsorption energy depends on the adsorbate, this feature
         should be exclusive with the `ads` feature. If you want to work with multiple
         adsorbates, then you should block by adsorbate. Why is it exclusive, you ask?
         Because I'm too lazy to code it.
@@ -638,11 +622,11 @@ class GASpyPreprocessor(object):
         if not docs:
             docs = copy.deepcopy(self.docs)
 
-        # We need to calculate the per-atom-energies and also establish some dummy features.
+        # We need to calculate the median adsorption energy establish some dummy features.
         # These two methods do this and assign them as attributes. Note the `if-then` that
         # makes sure we only call these methods if they have not yet been executed.
-        if not hasattr(self, 'per_atom_energies'):
-            self.__calculate_per_atom_energies(docs)
+        if not hasattr(self, 'median_adsorption_energies'):
+            self.__calculate_median_adsorption_energies(docs)
         if not hasattr(self, 'dummy_pfs'):
             self.__define_dummy_chemfp0(docs)
 
