@@ -13,7 +13,7 @@ echo $pklname
 python convert_prediction_to_json.py ../cache/predictions/$pklname.pkl
 
 # Copy the new data over
-scp ../pkls/$pklname.json zulissi@sm1.cheme.cmu.edu:~/CatalystsRE/data/data3.json
+scp ../cache/predictions/$pklname.json zulissi@sm1.cheme.cmu.edu:~/CatalystsRE/data/data3.json
 
 # Force the server to restart
 ssh -t zulissi@sm1.cheme.cmu.edu "cd CatalystsRE && ./build_run.sh"
