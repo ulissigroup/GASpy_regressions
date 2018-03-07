@@ -6,6 +6,7 @@ such as modeling or predicting and then saving them.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+import pdb
 from tpot import TPOTRegressor
 import gaspy_regress.gio
 import gaspy_regress.predict
@@ -31,7 +32,8 @@ def modeling(fit_blocks=None, train_size=1, dev_size=None, tpot_verbosity=1,
                          n_jobs=n_jobs)
     H = GASpyRegressor(features=features, responses=responses,
                        blocks=blocks, vasp_settings=VASP_SETTINGS,
-                       train_size=train_size, dev_size=dev_size)
+                       train_size=train_size, dev_size=dev_size,
+                       dim_red='pca')
     H.fit_tpot(tpot, model_name=model_name, blocks=fit_blocks)
     gaspy_regress.gio.dump_model(H)
 
