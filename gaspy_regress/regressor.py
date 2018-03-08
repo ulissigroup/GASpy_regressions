@@ -674,40 +674,42 @@ class GASpyRegressor(object):
             raise error
 
 
-    def parity_plot(self, split=False, jupyter=True, plotter='plotly',
+    def parity_plot(self, blocks=None, datasets=None, jupyter=True, plotter='plotly',
                     xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
                     fname='parity.pdf', figsize=None, s=None, alpha=0.4, font=None):
         '''
         Create a parity plot of the model that's been fit.
 
         Input:
-            split   A boolean indicating whether you want to differentiate train
-                    and test (i.e., pool them or not). Note that this is effectively
-                    ignored if you instantiated this class with `train_size == 1`.
-            jupyter A boolean that you pass to tell this class whether you are
-                    in a Jupyter notebook or not. This will change how it displays.
-            plotter A string indicating the plotting tool you want to use. It can
-                    be 'plotly' or 'matplotlib'
-            xlabel  A string for the x-axis label
-            ylabel  A string for the y-axis label
-            title   A string for the title name. If `default`,
-                    it turns into a string made up of class attributes.
-            lims    A list whose elements decide the bounds within
-                    which to create the parity line.
-            shift   A float indicating how far you want to shift the energy values.
-                    This is useful for when you are adding entropic contributions
-                    to zero point energies.
-            figsize A 2-tuple indicating the size of the panel. Defaults to (15, 15).
-                    Only works when plotter == 'matplotlib'.
-            fname   A string indicating the file name you want to save the figure as.
-                    Only works when plotter == 'matplotlib'
-            s       An integer (or float?) indicating the size of the marker you
-                    want to use. Only works when plotter == 'matplotlib'
-            alpha   A float between 0 and 1 indicating the transparency you want
-                    in the data. 0 is totally transparent and 1 is opaque.
-                    Only works when plotter == 'matplotlib'.
-            font    A dictionary that matplotlib accepts to establish the fonts you
-                    want to use. Only works when plotter == 'matplotlib'
+            blocks      A list of the blocks that you want to plot. If `None`,
+                        will show all blocks.
+            datasets    A list of the datasets that you want to plot (e.g., 'train',
+                        'dev', test', or 'all'). If `None` will show all datasets
+                        excluding 'all'.
+            jupyter     A boolean that you pass to tell this class whether you are
+                        in a Jupyter notebook or not. This will change how it displays.
+            plotter     A string indicating the plotting tool you want to use. It can
+                        be 'plotly' or 'matplotlib'
+            xlabel      A string for the x-axis label
+            ylabel      A string for the y-axis label
+            title       A string for the title name. If `default`,
+                        it turns into a string made up of class attributes.
+            lims        A list whose elements decide the bounds within
+                        which to create the parity line.
+            shift       A float indicating how far you want to shift the energy values.
+                        This is useful for when you are adding entropic contributions
+                        to zero point energies.
+            figsize     A 2-tuple indicating the size of the panel. Defaults to (15, 15).
+                        Only works when plotter == 'matplotlib'.
+            fname       A string indicating the file name you want to save the figure as.
+                        Only works when plotter == 'matplotlib'
+            s           An integer (or float?) indicating the size of the marker you
+                        want to use. Only works when plotter == 'matplotlib'
+            alpha       A float between 0 and 1 indicating the transparency you want
+                        in the data. 0 is totally transparent and 1 is opaque.
+                        Only works when plotter == 'matplotlib'.
+            font        A dictionary that matplotlib accepts to establish the fonts you
+                        want to use. Only works when plotter == 'matplotlib'
         Outputs:
             x       The values of the x-axis that you plot
             y       The values of the y-axis that you plot
@@ -731,6 +733,14 @@ class GASpyRegressor(object):
             font = {'family': 'sans', 'style': 'normal', 'size': 20}
         if not self.x:
             raise RuntimeError('Trying to plot without performing a fit first.')
+        if not blocks:
+            blocks = self.residuals.keys()
+        if not datasets:
+            datasets = self.x[(None,)].keys()
+            try:
+                datasets.remove('all')
+            except ValueError:
+                pass
 
         # Initialize the outputs
         y_out = {}
@@ -741,17 +751,8 @@ class GASpyRegressor(object):
         if plotter == 'matplotlib':
             plt.figure(figsize=figsize)
 
-        for block in self.residuals:
-            # Do some data parsing depending on what we want to show in the plot
-            if split:
-                datasets = self.x[(None,)].keys()
-                try:
-                    datasets.remove('all')  # Remove redundant plots
-                except ValueError:
-                    pass
-            else:
-                datasets = ['all']
-            # Unpack data from the class attributes
+        # Pick out the data for each block/dataset combination the user asked for
+        for block in blocks:
             for dataset in datasets:
                 y = self.y[block][dataset]
                 docs = self.docs[block][dataset]
@@ -804,7 +805,7 @@ class GASpyRegressor(object):
             plt.ylabel(ylabel)
             plt.xlim(lims)
             plt.ylim(lims)
-            plt.savefig(fname, bbox_inches='tight')
+            plt.savefig(fname, bbox_inches='tight', transparent=True)
             plt.legend()
             plt.show()
 
