@@ -58,7 +58,7 @@ def volcano(data, excel_file_path, sheetname, scale='linear', title=None,
 def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title=None,
                     x_label='DFT-prediction', y_label='ML-estimate', plot_range=None,
                     color='k', font_size=15, font_scale=1, grid_size=20, marker_size=20,
-                    jupyter=True,
+                    figsize=5, jupyter=True,
                     save=False, save_name='transformed_parity.pdf', save_dpi=900, **kwargs):
     '''
     This function will create a parity plot of a regression, but instead of plotting the typical
@@ -86,7 +86,9 @@ def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title
         font_size   The size of the fonts you want to create. Does nothing when
                     plot_type == 'plotly'
         font_scale  Scale the font. Works only when plot_type == 'hex'
+        grid_size   Grid size for hex plot
         marker_size The size of the markers. Works only when plot_type == 'matplotlib'
+        figsize     The length and width of the figure in inches
         jupyter     A boolean indicating whether or not you're using jupyter. This is
                     really only necessary when plot_type == 'plotly'
         save        A boolean indicating whether or not you want to save the plot.
@@ -154,7 +156,7 @@ def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title
         est_trimmed = np.array(est_trimmed)
         # Now plot
         grid = sns.jointplot(pred_trimmed, est_trimmed, kind='hex', space=0, stat_func=None,
-                             gridsize=grid_size, color=color)
+                             gridsize=grid_size, color=color, size=figsize)
         grid.set_axis_labels(x_label, y_label)
         # Add a parity line
         grid.ax_joint.plot(plot_range, plot_range, 'k--')
@@ -166,6 +168,7 @@ def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title
 
     # Make a scatter plot with Matplotlib
     if plot_type == 'matplotlib':
+        plt.figure(figsize=figsize)
         plt.scatter(pred, est, s=marker_size, c=color)
         plt.xlim(plot_min, plot_max)
         plt.ylim(plot_min, plot_max)
