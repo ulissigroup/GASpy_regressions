@@ -168,7 +168,7 @@ def filtered_parity(data, transform=True, scale='linear', plot_type='hex', title
 
     # Make a scatter plot with Matplotlib
     if plot_type == 'matplotlib':
-        plt.figure(figsize=figsize)
+        plt.figure(figsize=(figsize, figsize))
         plt.scatter(pred, est, s=marker_size, c=color)
         plt.xlim(plot_min, plot_max)
         plt.ylim(plot_min, plot_max)
