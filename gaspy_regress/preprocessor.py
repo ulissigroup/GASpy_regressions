@@ -584,7 +584,7 @@ class GASpyPreprocessor(object):
             for doc, sparse_elemental_fp in zip(docs, sparse_elemental_fps):
                 ads = doc['adsorbate']
                 chem_fp = []
-                for i in range(self.max_comp[ads]):
+                for i in range(max(self.max_comp.values())):
                     # EAFP to fill in the real fingerprints first and then the dummy ones
                     try:
                         chem_fp.append(sparse_elemental_fp[i])
@@ -659,7 +659,7 @@ class GASpyPreprocessor(object):
             for doc, sparse_elemental_fp in zip(docs, sparse_elemental_fps):
                 ads = doc['adsorbate']
                 chem_fp = []
-                for i in range(self.max_comp[ads]):
+                for i in range(max(self.max_comp.values())):
                     # EAFP to fill in the real fingerprints first and then the dummy ones
                     try:
                         chem_fp.append(sparse_elemental_fp[i])
