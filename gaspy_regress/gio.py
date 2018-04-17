@@ -210,13 +210,12 @@ def gdrive_dump(gsheet, worksheet, predictions_path=None, comparisons_path=None,
     # If the user did not pass a path, then define various parameter so that we can pull the data
     # via gaspy_regress's io
     else:
-        model_name = 'GP_around_TPOT'
-        features = ['coordcount']
-        outer_features = ['neighbors_coordcounts']
+        model_name = 'TPOT'
+        features = ['coordatoms_chemfp0', 'neighbors_chemfp0']
         responses = ['energy']
         blocks = ['adsorbate']
         system = 'CO2RR'
-        data_ball = load_predictions(model_name, features+outer_features, responses, blocks, system)
+        data_ball = load_predictions(model_name, features, responses, blocks, system)
     # Pass the data ball to the appropriate parsing/post-processing function
     best_surfaces, labels = predict.best_surfaces(data_ball, performance_threshold=0.1)
 

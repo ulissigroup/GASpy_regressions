@@ -14,8 +14,8 @@
 # CO2RR
 gsheet="gasdb_predictions"
 worksheet="CO2RR_T"
-predictions_path="/global/project/projectdirs/m2755/GASpy/GASpy_regressions/pkls/CO2RR_predictions_GP_around_TPOT_FEATURES_coordcount_neighbors_coordcounts_RESPONSES_energy_BLOCKS_adsorbate.pkl"
-comparisons_path="/global/project/projectdirs/m2755/GASpy/GASpy_regressions/pkls/HER_predictions_GP_around_TPOT_FEATURES_coordcount_neighbors_coordcounts_RESPONSES_energy_BLOCKS_adsorbate.pkl"
+predictions_path="/global/project/projectdirs/m2755/GASpy/GASpy_regressions/cache/predictions/CO2RR_predictions_TPOT_FEATURES_coordatoms_chemfp0_neighbors_chemfp0_RESPONSES_energy_BLOCKS_adsorbate.pkl"
+comparisons_path="/global/project/projectdirs/m2755/GASpy/GASpy_regressions/cache/predictions/HER_predictions_TPOT_FEATURES_coordatoms_chemfp0_neighbors_chemfp0_RESPONSES_energy_BLOCKS_adsorbate.pkl"
 identifying_labels="MPID, Miller, Top?"
 reporting_labels="dE [eV], Performance, Mongo ID"
 comparison_name="HER"
@@ -24,5 +24,5 @@ python -c "from gaspy_regress.gio import gdrive_dump; gdrive_dump('$gsheet', '$w
 # HER
 gsheet="gasdb_predictions"
 worksheet="HER_T"
-predictions_path="/global/project/projectdirs/m2755/GASpy/GASpy_regressions/pkls/HER_predictions_GP_around_TPOT_FEATURES_coordcount_neighbors_coordcounts_RESPONSES_energy_BLOCKS_adsorbate.pkl"
+predictions_path="/global/project/projectdirs/m2755/GASpy/GASpy_regressions/cache/predictions/HER_predictions_TPOT_FEATURES_coordatoms_chemfp0_neighbors_chemfp0_RESPONSES_energy_BLOCKS_adsorbate.pkl"
 python -c "from gaspy_regress.gio import gdrive_dump; gdrive_dump('$gsheet', '$worksheet', predictions_path='$predictions_path')"
