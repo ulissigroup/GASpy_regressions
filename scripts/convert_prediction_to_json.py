@@ -7,6 +7,7 @@ import collections
 import json
 import bson
 import re
+from dateutil import parser
 
 # reads in pickled array of objects
 
@@ -33,6 +34,7 @@ def format(data):
     for j in range(len(data[0])):
         document = data[0][j][0]
         #Use the calculated energies
+        document['adslab_calculation_date']=str(parser.parse(document['adslab_calculation_date']).date())
         document['energies'] = {}
         document['uncertainties'] = {}
         for i in range(len(data[0][j][1])):

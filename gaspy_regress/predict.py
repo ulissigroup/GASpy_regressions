@@ -147,6 +147,8 @@ def volcano(regressor, regressor_block, sheetname, excel_file_path, scale,
         doc['energy'] = dE
         doc['ML'] = True
     # Combine all the documents into one list. Then make it json compatible.
+    for doc in ads_docs:
+        doc['adslab_calculation_date'] = str(doc['adslab_calculation_date'])
     all_docs = ads_docs + unsim_cat_docs
     for doc in all_docs:
         doc['mongo_id'] = str(doc['mongo_id'])
