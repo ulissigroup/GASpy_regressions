@@ -177,7 +177,7 @@ class GASpyRegressor(object):
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
-        if 'coordatoms_chemfp0' in features:
+        if 'neighbors_chemfp0' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'

@@ -274,8 +274,8 @@ class GASpyPreprocessor(object):
             docs = copy.deepcopy(self.docs)
 
         # Find all of the unique adsorbate types. Then fit a label binarizer on them
-        # that will be able to convert a single string into a binary vector.
-        ads = np.unique([doc['adsorbate'] for doc in docs])
+        # that will be able to convert a list of strings into a binary vector.
+        ads = list(set(doc['adsorbate'] for doc in docs))
         lb = preprocessing.LabelBinarizer()
         lb.fit(ads)
 
@@ -283,7 +283,7 @@ class GASpyPreprocessor(object):
         def preprocess_ads(docs):
             # Package the calculation into a function so that we can possibly parallelize it
             def _preprocess_ads(doc):  # noqa: E306
-                ads = doc['adsorbate']
+                ads = [doc['adsorbate']]
                 ads_vector = lb.transform(ads)[0]
                 return ads_vector
             ads_vectors = [_preprocess_ads(doc) for doc in docs]
