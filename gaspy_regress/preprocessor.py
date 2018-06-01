@@ -41,8 +41,8 @@ class GASpyPreprocessor(object):
                         (e.g., 'coordcount'). Order matters, because the pre-processed
                         features will be stacked in order of appearance in this list.
             dim_red     A string indicating which dimensionality reduction technique you want
-                        to use. Currently accepts `False` for no dimensionality reduction
-                        and 'truncated_svd'.
+                        to use. Currently accepts `False` for no dimensionality reduction,
+                        'truncated_svd', and 'pca'.
             kwargs      Whatever arguments you want to pass to the dimensionality reducer.
         Resulting attributes:
             docs            The same as the `docs` input, but simply saved as an attribute
