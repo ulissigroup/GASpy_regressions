@@ -49,8 +49,8 @@ class GASpyRegressor(object):
                  fingerprints=None, vasp_settings=None, collection='adsorption',
                  energy_min='default', energy_max='default', f_max='default',
                  ads_move_max='default', bare_slab_move_max='default', slab_move_max='default',
-                 train_size=1, dev_size=None, n_bins=20, k_folds=None, random_state=42,
-                 time_series=False, **kwargs):
+                 date_min=None, date_max=None, train_size=1, dev_size=None, n_bins=20,
+                 k_folds=None, random_state=42, time_series=False, **kwargs):
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -84,6 +84,10 @@ class GASpyRegressor(object):
             vasp_settings       A string of vasp settings. Use the
                                 vasp_settings_to_str function in GAspy
             collection          A string for the mongo db collection you want to pull from.
+            date_min            Python datetime object that specifies the earliest date
+                                that you'd like to pull data from
+            date_max            Python datetime object that specifies the latest date
+                                that you'd like to pull data from
             energy_min          The minimum adsorption energy to pull from the
                                 adsorption DB (eV). If 'default', then pulls the default
                                 value from gaspy.defaults.doc_filters
@@ -186,8 +190,6 @@ class GASpyRegressor(object):
         fingerprints['mongo_id'] = '$_id'
         # Some features require specific fingerprints. Here, we make sure that those
         # fingerprints are included
-        if 'ads' in features:
-            fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
         if 'coordcount' in features:
             fingerprints['symbols'] = '$atoms.chemical_symbols'
             fingerprints['coordination'] = '$processed_data.fp_final.coordination'
@@ -218,12 +220,6 @@ class GASpyRegressor(object):
         # If we want to block by some fingerprint, then we had better pull it out.
         # Here are some common ones to make life easy.
         if blocks:
-            if 'adsorbate' in blocks:
-                fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
-            if 'mpid' in blocks:
-                fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
-            if 'miller' in blocks:
-                fingerprints['miller'] = '$processed_data.calculation_info.miller'
             if 'top' in blocks:
                 fingerprints['top'] = '$processed_data.calculation_info.top'
             if 'coordination' in blocks:
@@ -241,6 +237,7 @@ class GASpyRegressor(object):
         # much always want these.
         fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
         fingerprints['miller'] = '$processed_data.calculation_info.miller'
+        fingerprints['adsorbates'] = '$processed_data.calculation_info.adsorbate_names'
         fingerprints['adslab_calculation_date'] = '$processed_data.FW_info.adslab_calculation_date'
 
         # Pull the data into a list of mongo (json) documents
@@ -265,6 +262,11 @@ class GASpyRegressor(object):
         if time_series:
             docs.sort(key=lambda doc: doc['adslab_calculation_date'])
             n_bins = None
+        # Or parse out docs that are too old/new
+        if date_min:
+            docs = [doc for doc in docs if date_min <= doc['adslab_calculation_date']]
+        if date_max:
+            docs = [doc for doc in docs if doc['adslab_calculation_date'] <= date_max]
 
         # Preprocess the features
         pp = GASpyPreprocessor(docs, features, dim_red=dim_red, **kwargs)
