@@ -23,7 +23,7 @@ import matplotlib
 from matplotlib import pyplot as plt
 import seaborn as sns
 from .preprocessor import GASpyPreprocessor
-from gaspy import utils, gasdb
+from gaspy import utils, gasdb, defaults
 
 
 class GASpyRegressor(object):
@@ -47,10 +47,10 @@ class GASpyRegressor(object):
     '''
     def __init__(self, features, responses, blocks=None, dim_red=None,
                  fingerprints=None, vasp_settings=None, collection='adsorption',
-                 energy_min=-4, energy_max=4, f_max=0.5,
-                 ads_move_max=1.5, bare_slab_move_max=0.5, slab_move_max=1.5,
+                 energy_min='default', energy_max='default', f_max='default',
+                 ads_move_max='default', bare_slab_move_max='default', slab_move_max='default',
                  train_size=1, dev_size=None, n_bins=20, k_folds=None, random_state=42,
-                 **kwargs):
+                 time_series=False, **kwargs):
         '''
         Pull and preprocess the data that you want to regress. The "regression options"
         define how we want to perform the regression. "Pulling/filtering" options decide
@@ -59,7 +59,7 @@ class GASpyRegressor(object):
 
         Inputs (regression options):
             features    A list of strings for each of the features that you want
-                        to include.  These strings should correspond to the
+                        to include. These strings should correspond to the
                         1st-level hidden methods in `GASpyPreprocessor`, but
                         without the leading underscore.  For example:
                         features = ('coordcount', 'ads')
@@ -85,17 +85,24 @@ class GASpyRegressor(object):
                                 vasp_settings_to_str function in GAspy
             collection          A string for the mongo db collection you want to pull from.
             energy_min          The minimum adsorption energy to pull from the
-                                adsorption DB (eV)
+                                adsorption DB (eV). If 'default', then pulls the default
+                                value from gaspy.defaults.doc_filters
             energy_max          The maximum adsorption energy to pull from the
-                                adsorption DB (eV)
+                                adsorption DB (eV). If 'default', then pulls the default
+                                value from gaspy.defaults.doc_filters
             f_max               The upper limit on the maximum force on an atom
-                                in the system
+                                in the system. If 'default', then pulls the default
+                                value from gaspy.defaults.doc_filters
             ads_move_max        The maximum distance that an adsorbate atom may
-                                move (angstrom)
+                                move (angstrom). If 'default', then pulls the default
+                                value from gaspy.defaults.doc_filters
             bare_slab_move_max  The maxmimum distance that a slab atom may move
-                                when it is relaxed without an adsorbate (angstrom)
+                                when it is relaxed without an adsorbate (angstrom).
+                                If 'default', then pulls the default
+                                value from gaspy.defaults.doc_filters
             slab_move_max       The maximum distance that a slab atom may move
-                                (angstrom)
+                                (angstrom). If 'default', then pulls the default
+                                value from gaspy.defaults.doc_filters
 
         Inputs (data splitting options):
             train_size  A float between 0 and 1 indicating the fraction of your
@@ -115,7 +122,12 @@ class GASpyRegressor(object):
                         number if you are still tuning. Defaults to `None`, which skips
                         cross-validation.
             n_bins      A positive integer for how many bins you want to use to stratify the root
-                        train/test split. This is ignored if train_size == 1. Defaults to 20
+                        train/test split. This is ignored if train_size == 1. Defaults to 20.
+                        If `None`, then no stratification is used and shuffling is turned off.
+                        This is useful for time-series splitting.
+            time_series If `True`, then it will split and sort based on date. `n_bins` will be
+                        effectively ignored. In other words:  If `train_size == 0.5`, then
+                        the regressor will train on the first half of the data that was generated.
 
         Resulting attributes:
             features        Same thing as the input. Used mainly for making file_name to save
@@ -149,6 +161,20 @@ class GASpyRegressor(object):
         self.features = features
         self.responses = responses
         self.blocks = blocks
+        # Set defaults for some of the filters
+        default_filters = defaults.doc_filters()
+        if energy_min == 'default':
+            energy_min = default_filters['energy_min']
+        if energy_max == 'default':
+            energy_max = default_filters['energy_max']
+        if f_max == 'default':
+            f_max = default_filters['f_max']
+        if ads_move_max == 'default':
+            ads_move_max = default_filters['ads_move_max']
+        if bare_slab_move_max == 'default':
+            bare_slab_move_max = default_filters['bare_slab_move_max']
+        if slab_move_max == 'default':
+            slab_move_max = default_filters['slab_move_max']
 
         # Python doesn't like dictionaries being used as default values, so we initialize here
         if not vasp_settings:
@@ -214,7 +240,8 @@ class GASpyRegressor(object):
         # And here we pull a couple of other things for good measure. Because we pretty
         # much always want these.
         fingerprints['mpid'] = '$processed_data.calculation_info.mpid'
-        fingerprints['miller'] = '$processed_data.calculation_info.miller',
+        fingerprints['miller'] = '$processed_data.calculation_info.miller'
+        fingerprints['adslab_calculation_date'] = '$processed_data.FW_info.adslab_calculation_date'
 
         # Pull the data into a list of mongo (json) documents
         with gasdb.get_adsorption_client() as client:
@@ -233,6 +260,11 @@ class GASpyRegressor(object):
         # Add the 'adsorbate' key to the dictionaries. Because why the hell not.
         for doc in docs:
             doc['adsorbate'] = doc['adsorbates'][0]
+
+        # Sort the documents by time-series if the user wanted it
+        if time_series:
+            docs.sort(key=lambda doc: doc['adslab_calculation_date'])
+            n_bins = None
 
         # Preprocess the features
         pp = GASpyPreprocessor(docs, features, dim_red=dim_red, **kwargs)
@@ -258,8 +290,16 @@ class GASpyRegressor(object):
                                    'all': docs}}
         # If we're splitting, then start splitting
         else:
-            y_train, y_test, x_train, x_test, docs_train, docs_test = \
-                self._stratified_split(n_bins, train_size, random_state, y, x, docs)
+            # Do a stratified split
+            if n_bins:
+                y_train, y_test, x_train, x_test, docs_train, docs_test = \
+                    self._stratified_split(n_bins, train_size, random_state, y, x, docs)
+            # If there are no bins (and therefore no stratification), then do a normal
+            # train test split without any shuffling
+            else:
+                y_train, y_test, x_train, x_test, docs_train, docs_test = \
+                    train_test_split(y, x, docs, train_size=train_size,
+                                     random_state=random_state, shuffle=False)
             # Now store the information in class attributes
             self.x = {(None,): {'test': x_test,
                                 'all': x}}
@@ -640,9 +680,9 @@ class GASpyRegressor(object):
         return np.concatenate(predictions, axis=0).flatten()
 
 
-    def print_performance_metric(self, metric='rmse'):
+    def calc_performance_metric(self, metric='rmse'):
         '''
-        Calculate and report the performance metrics of the fitted model.
+        Calculate the performance metrics of the fitted model.
 
         Inputs:
             metric  A string indicating which performance metric you want plotted.
@@ -665,8 +705,7 @@ class GASpyRegressor(object):
                         metric_values[block][dataset] = metrics.median_absolute_error(y, y_hat)
                     else:
                         raise SyntaxError('"%s" is not a valid argument for "metric"' % metric)
-            print('%s values:' % metric)
-            utils.print_dict(metric_values, indent=1)
+            return metric_values
 
         # Tell the user what they probably did wrong
         except AttributeError as error:
@@ -676,7 +715,7 @@ class GASpyRegressor(object):
 
     def parity_plot(self, blocks=None, datasets=None, jupyter=True, plotter='plotly',
                     xlabel=None, ylabel=None, title=None, lims=None, shift=0.,
-                    fname='parity.pdf', figsize=None, s=None, alpha=0.4, font=None):
+                    fname=None, figsize=None, s=None, alpha=0.4, font=None):
         '''
         Create a parity plot of the model that's been fit.
 
@@ -702,7 +741,8 @@ class GASpyRegressor(object):
             figsize     A 2-tuple indicating the size of the panel. Defaults to (15, 15).
                         Only works when plotter == 'matplotlib'.
             fname       A string indicating the file name you want to save the figure as.
-                        Only works when plotter == 'matplotlib'
+                        Only works when plotter == 'matplotlib'. Defaults to `None`, in which
+                        case the figure will not be saved.
             s           An integer (or float?) indicating the size of the marker you
                         want to use. Only works when plotter == 'matplotlib'
             alpha       A float between 0 and 1 indicating the transparency you want
@@ -805,7 +845,8 @@ class GASpyRegressor(object):
             plt.ylabel(ylabel)
             plt.xlim(lims)
             plt.ylim(lims)
-            plt.savefig(fname, bbox_inches='tight', transparent=True)
+            if fname:
+                plt.savefig(fname, bbox_inches='tight', transparent=True)
             plt.legend()
             plt.show()
 
