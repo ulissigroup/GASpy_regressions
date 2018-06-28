@@ -9,6 +9,7 @@ __email__ = 'ktran@andrew.cmu.edu'
 import pdb  # noqa:  F401
 import copy
 from collections import OrderedDict
+import pickle
 import numpy as np
 import tqdm
 from sklearn import preprocessing, decomposition
@@ -391,17 +392,32 @@ class GASpyPreprocessor(object):
         '''
         docs = copy.deepcopy(docs)
 
-        # Filter the documents to include only pure metals. We do this by first
-        # finding compositions of all of the mpid's we're looking at and then
-        # including only documents that contain one element in the composition
-        mpids = set(doc['mpid'] for doc in docs)
-        self.compositions_by_mpid = {}
-        print('Beginning to pull data from the Materials Project...')
-        with MPRester(read_rc()['matproj_api_key']) as m:
-            for mpid in tqdm.tqdm(mpids):
-                entry = m.get_entry_by_material_id(mpid)
-                self.compositions_by_mpid[mpid] = entry.as_dict()['composition'].keys()
-        docs = [doc for doc in docs if len(self.compositions_by_mpid[doc['mpid']]) == 1]
+        # We'll be reading composition data from MP. Since that takes awhile, we use a cache
+        # of that data if available. First let's figure out where the cache is.
+        rc = read_rc()
+        cache_path = rc['gaspy_path'] + '/GASpy_regressions/cache/mp_comp_data.pkl'
+        # If the cache works out fine, then open it up and use it to filter out docs
+        # of only pure metals
+        try:
+            with open(cache_path, 'r') as file_handle:
+                self.compositions_by_mpid = pickle.load(file_handle)
+            docs = [doc for doc in docs if len(self.compositions_by_mpid[doc['mpid']]) == 1]
+
+        # If the cache is not there or does not include information we need, then
+        # create it by reading from MP
+        except (IOError, KeyError):
+            # Find compositions of all of the mpid's we're looking at
+            mpids = set(doc['mpid'] for doc in docs)
+            self.compositions_by_mpid = {}
+            print('Beginning to pull data from the Materials Project...')
+            with MPRester(read_rc()['matproj_api_key']) as mat_proj:
+                for mpid in tqdm.tqdm(mpids):
+                    entry = mat_proj.get_entry_by_material_id({'task_ids': mpid})
+                    self.compositions_by_mpid[mpid] = entry.as_dict()['composition'].keys()
+            docs = [doc for doc in docs if len(self.compositions_by_mpid[doc['mpid']]) == 1]
+            # If the cache worked out, then save it
+            with open(cache_path, 'w') as file_handle:
+                pickle.dump(copy.deepcopy(self.compositions_by_mpid), file_handle)
 
         # Now find all of the unique adsorbates that we've done pure metal calculations for.
         adsorbates = set(doc['adsorbate'] for doc in docs)
