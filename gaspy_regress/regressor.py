@@ -47,7 +47,7 @@ class GASpyRegressor(object):
     '''
     def __init__(self, features, responses, blocks=None, dim_red=None,
                  fingerprints=None, vasp_settings=None, collection='adsorption',
-                 energy_min='default', energy_max='default', f_max='default',
+                 exclude=None, energy_min='default', energy_max='default', f_max='default',
                  ads_move_max='default', bare_slab_move_max='default', slab_move_max='default',
                  date_min=None, date_max=None, train_size=1, dev_size=None, n_bins=20,
                  k_folds=None, random_state=42, time_series=False, **kwargs):
@@ -84,6 +84,11 @@ class GASpyRegressor(object):
             vasp_settings       A string of vasp settings. Use the
                                 vasp_settings_to_str function in GAspy
             collection          A string for the mongo db collection you want to pull from.
+            exclude             A dictionary that is used to exclude particular data.
+                                The keys should be identical to the keys the Mongo documents
+                                (and are probably the same keys as the ones used in
+                                'fingerprints'). The values should be lists of the document
+                                values to exclude.
             date_min            Python datetime object that specifies the earliest date
                                 that you'd like to pull data from
             date_max            Python datetime object that specifies the latest date
@@ -267,6 +272,14 @@ class GASpyRegressor(object):
             docs = [doc for doc in docs if date_min <= doc['adslab_calculation_date']]
         if date_max:
             docs = [doc for doc in docs if doc['adslab_calculation_date'] <= date_max]
+        # And then parse out anything else the user wants excluded
+        if exclude:
+            for key, values in exclude.iteritems():
+                # Turn the values into a set to parse through them faster
+                values = set(values)
+                # Regenerate docs, but exclude documents according to the `exclude`
+                # dictionary
+                docs = [doc for doc in docs if doc[key] not in values]
 
         # Preprocess the features
         pp = GASpyPreprocessor(docs, features, dim_red=dim_red, **kwargs)
