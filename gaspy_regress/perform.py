@@ -6,7 +6,6 @@ such as modeling or predicting and then saving them.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
-import pdb
 from tpot import TPOTRegressor
 import gaspy_regress.gio
 import gaspy_regress.predict
