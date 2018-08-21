@@ -16,18 +16,23 @@ from ..fingerprints import InnerShellFingerprinter
 # Things we need to do the tests
 import os
 import pytest
+import numpy.testing as npt
 import pickle
 import mendeleev
 from pymatgen.ext.matproj import MPRester
-from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
+from gaspy.gasdb import get_catalog_docs
 from gaspy.utils import read_rc
 
 REGRESSION_BASELINES_LOCATION = '/home/GASpy/GASpy_regressions/gaspy_regress/tests/regression_baselines/fingerprints/'
 
 
-# We should probably add more test cases here...
-@pytest.fixture(params=[get_adsorption_docs()])
-def inner_shell_fingerprinter(request):
+@pytest.fixture(params=['CO', 'H'], scope='module')
+def inner_shell_fingerprinting_fixture(request):
+    '''
+    Note that we set this fixture's scope to 'module' so that we only
+    have to make one fingerprinter, not because the tests necessarily
+    need to interact with each other.
+    '''
     try:
         # Remove the cache to make sure that the new instance of the fingerprinter
         # is the one that's actually making the cache correctly
@@ -35,50 +40,62 @@ def inner_shell_fingerprinter(request):
     except OSError:
         pass
 
-    return InnerShellFingerprinter(request.param)
+    adsorbate = request.param
+    return InnerShellFingerprinter(adsorbate=adsorbate), adsorbate
 
 
 class TestInnerShellFingerprinter(object):
+    def test___init__(self, inner_shell_fingerprinting_fixture):
+        '''
+        We only test for the presence of the attributes. The other tests
+        in this class verify the correctness of these attributes.
+        '''
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        assert fingerprinter.adsorbate == adsorbate
+        assert hasattr(fingerprinter, 'dummy_fp')
+        assert hasattr(fingerprinter, 'max_num_species')
+        assert not hasattr(fingerprinter, 'adsorption_docs')
+        assert not hasattr(fingerprinter, 'catalog_docs')
+
+
     @pytest.mark.baseline
-    def test_to_create_dummy_fp(self, inner_shell_fingerprinter):
-        with open(REGRESSION_BASELINES_LOCATION + 'dummy_fp_inner_shell.pkl', 'wb') as file_handle:
-            pickle.dump(inner_shell_fingerprinter.dummy_fp, file_handle)
+    def test_to_create_dummy_fp(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        dummy_fp = fingerprinter.dummy_fp
+
+        cache_location = REGRESSION_BASELINES_LOCATION + 'inner_shell_dummy_fp_%s.pkl' % adsorbate
+        with open(cache_location, 'wb') as file_handle:
+            pickle.dump(dummy_fp, file_handle)
 
 
-    def test__calculate_dummy_fp(self, inner_shell_fingerprinter):
-        with open(REGRESSION_BASELINES_LOCATION + 'dummy_fp_inner_shell.pkl', 'rb') as file_handle:
+    def test__calculate_dummy_fp(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        dummy_fp = fingerprinter.dummy_fp
+
+        cache_location = REGRESSION_BASELINES_LOCATION + 'inner_shell_dummy_fp_%s.pkl' % adsorbate
+        with open(cache_location, 'rb') as file_handle:
             expected_dummy_fp = pickle.load(file_handle)
-        assert inner_shell_fingerprinter.dummy_fp == expected_dummy_fp
+        assert dummy_fp == expected_dummy_fp
 
 
-    @pytest.mark.baseline
-    def test_to_create_max_num_species(self, inner_shell_fingerprinter):
-        with open(REGRESSION_BASELINES_LOCATION + 'max_species_inner_shell.pkl', 'wb') as file_handle:
-            pickle.dump(inner_shell_fingerprinter.max_num_species, file_handle)
-
-
-    def test__calculate_max_num_species(self, inner_shell_fingerprinter):
-        with open(REGRESSION_BASELINES_LOCATION + 'max_species_inner_shell.pkl', 'rb') as file_handle:
-            expected_max_num_species = pickle.load(file_handle)
-        assert inner_shell_fingerprinter.max_num_species == expected_max_num_species
-
-
-    def test__get_compositions_by_mpid(self, inner_shell_fingerprinter):
+    def test__get_compositions_by_mpid(self, inner_shell_fingerprinting_fixture):
         '''
         3-part test:
             Test that the method saved the cache
             Test that all the MPIDs we need are there
             Test that all the data in the cache is correct
         '''
+        fingerprinter, _ = inner_shell_fingerprinting_fixture
+
         # Make sure that we saved the object correctly
         with open('/home/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'rb') as file_handle:
             saved_compositions_by_mpid = pickle.load(file_handle)
-        compositions_by_mpid = inner_shell_fingerprinter.compositions_by_mpid
+        compositions_by_mpid = fingerprinter.compositions_by_mpid
         assert compositions_by_mpid == saved_compositions_by_mpid
 
         # Make sure that all of the required MPIDs are in the new object
-        required_mpids = set(doc['mpid'] for doc in inner_shell_fingerprinter.docs)
-        known_mpids = set(inner_shell_fingerprinter.compositions_by_mpid.keys())
+        required_mpids = set(doc['mpid'] for doc in get_catalog_docs())
+        known_mpids = set(fingerprinter.compositions_by_mpid.keys())
         assert required_mpids.issubset(known_mpids)
 
         # Make sure that the compositions we do have are correct
@@ -89,70 +106,90 @@ class TestInnerShellFingerprinter(object):
                 assert compositions_by_mpid[mpid] == expected_composition
 
 
-    def test__get_mendeleev_data(self, inner_shell_fingerprinter):
-        mendeleev_data = inner_shell_fingerprinter.mendeleev_data
-        compositions_by_mpid = inner_shell_fingerprinter.compositions_by_mpid
-        docs = inner_shell_fingerprinter.docs
+    def test__get_mendeleev_data(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, _ = inner_shell_fingerprinting_fixture
+        mendeleev_data = fingerprinter.mendeleev_data
 
-        for doc in docs:
-            mpid = doc['mpid']
-            composition = compositions_by_mpid[mpid]
-            for element in composition:
-                assert mendeleev_data[element] == getattr(mendeleev, element)
+        # Identify the elements that should be in `mendeleev_data`
+        mpids = set(doc['mpid'] for doc in get_catalog_docs())
+        elements = []
+        for mpid in mpids:
+            composition = fingerprinter.compositions_by_mpid[mpid]
+            elements.extend(composition)
+        elements = set(elements)
+
+        # Test that we got the data correctly
+        for element in elements:
+            assert mendeleev_data[element] == getattr(mendeleev, element)
 
 
     @pytest.mark.baseline
-    def test_to_create_median_adsorption_energies(self, inner_shell_fingerprinter):
-        with open(REGRESSION_BASELINES_LOCATION + 'median_adsorption_energies_inner_shell.pkl', 'wb') as file_handle:
-            pickle.dump(inner_shell_fingerprinter.median_adsorption_energies, file_handle)
+    def test_to_create_median_adsorption_energies(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        median_adsorption_energies = fingerprinter.median_adsorption_energies
+
+        cache_location = REGRESSION_BASELINES_LOCATION + \
+                         'inner_shell_median_adsorption_energies_%s.pkl' % adsorbate
+        with open(cache_location, 'wb') as file_handle:
+            pickle.dump(median_adsorption_energies, file_handle)
         assert True
 
 
-    def test__calculate_median_adsorption_energies(self, inner_shell_fingerprinter):
-        with open(REGRESSION_BASELINES_LOCATION + 'median_adsorption_energies_inner_shell.pkl', 'rb') as file_handle:
+    def test__calculate_median_adsorption_energies(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        median_adsorption_energies = fingerprinter.median_adsorption_energies
+
+        cache_location = REGRESSION_BASELINES_LOCATION + \
+                        'inner_shell_median_adsorption_energies_%s.pkl' % adsorbate
+        with open(cache_location, 'rb') as file_handle:
             expected_median_adsorption_energies = pickle.load(file_handle)
-        median_adsorption_energies = inner_shell_fingerprinter.median_adsorption_energies
         assert median_adsorption_energies == expected_median_adsorption_energies
 
 
-    def test__filter_out_alloys_from_docs(self, inner_shell_fingerprinter):
-        compositions_by_mpid = inner_shell_fingerprinter.compositions_by_mpid
-        filtered_docs, monometallic_elements = inner_shell_fingerprinter._filter_out_alloys_from_docs()
+    @pytest.mark.baseline
+    def test_to_create_max_num_species(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        max_num_species = fingerprinter.max_num_species
 
-        # Test that the function is filtering correctly
-        elements = set()
-        for doc in filtered_docs:
-            composition = compositions_by_mpid[doc['mpid']]
-            number_of_elements = len(composition)
-            assert number_of_elements == 1
+        cache_location = REGRESSION_BASELINES_LOCATION + 'inner_shell_max_species_%s.pkl' % adsorbate
+        with open(cache_location, 'wb') as file_handle:
+            pickle.dump(max_num_species, file_handle)
 
-            # Test that we got all of the monometallic elements (and only the monometallics)
-            if number_of_elements == 1:
-                elements.add(composition[0])
-        assert elements == monometallic_elements
+
+    def test__get_max_num_species(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
+        max_num_species = fingerprinter.max_num_species
+
+        cache_location = REGRESSION_BASELINES_LOCATION + 'inner_shell_max_species_%s.pkl' % adsorbate
+        with open(cache_location, 'rb') as file_handle:
+            expected_max_num_species = pickle.load(file_handle)
+        assert max_num_species == expected_max_num_species
 
 
     @pytest.mark.baseline
-    def test_to_create_docs_fingerprints(self, inner_shell_fingerprinter):
+    def test_to_create_docs_fingerprints(self, inner_shell_fingerprinting_fixture):
         '''
         The arguments should really be parametrized, but pytest can't handle
         both fixtures and parametrization simultaneously. So we'll settle
         for a single test case for now.
         '''
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
         docs = get_catalog_docs()
-        flatten = True
-        fingerprints = inner_shell_fingerprinter.fingerprint_docs(docs, flatten=flatten)
+        fingerprints = fingerprinter.fingerprint_docs(docs)
 
-        with open(REGRESSION_BASELINES_LOCATION + 'fingerprints_inner_shell.pkl', 'wb') as file_handle:
+        cache_location = REGRESSION_BASELINES_LOCATION + 'inner_shell_fingerprint_docs_%s.pkl' % adsorbate
+        with open(cache_location, 'wb') as file_handle:
             pickle.dump(fingerprints, file_handle)
         assert True
 
 
-    def test_to_fingerprint_docs(self, inner_shell_fingerprinter):
+    def test_to_fingerprint_docs(self, inner_shell_fingerprinting_fixture):
+        fingerprinter, adsorbate = inner_shell_fingerprinting_fixture
         docs = get_catalog_docs()
-        flatten = True
-        fingerprints = inner_shell_fingerprinter.fingerprint_docs(docs, flatten=flatten)
+        fingerprints = fingerprinter.fingerprint_docs(docs)
 
-        with open(REGRESSION_BASELINES_LOCATION + 'fingerprints_inner_shell.pkl', 'rb') as file_handle:
+        cache_location = REGRESSION_BASELINES_LOCATION + 'inner_shell_fingerprint_docs_%s.pkl' % adsorbate
+        with open(cache_location, 'rb') as file_handle:
             expected_fingerprints = pickle.load(file_handle)
-        assert fingerprints == expected_fingerprints
+        for fingerprint, expected_fingerprint in zip(fingerprints, expected_fingerprints):
+            npt.assert_allclose(fingerprint, expected_fingerprint)

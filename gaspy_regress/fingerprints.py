@@ -7,18 +7,20 @@ so that they can be fed into regression pipelines.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+import warnings
 import pickle
 import numpy as np
 import mendeleev
 from pymatgen.ext.matproj import MPRester
 from gaspy.utils import read_rc
+from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
 
 
 class InnerShellFingerprinter(object):
     '''
     This fingerprinter converts the "inner shell" atoms---i.e., the coordinated
     atoms---into a Nx4 array of numbers, where N is the maximum number of
-    elements seen in any of the inner shells of the training set. Each 1x4
+    elements seen in any of the inner shells all sites in the catalog. Each 1x4
     vector corresponds to one of the elements present in this inner shell. The
     numbers in the 1x4 vectors are the element's median adsorption energy, its
     atomic number, its Pauling electronegativity, and the number of those
@@ -31,16 +33,25 @@ class InnerShellFingerprinter(object):
     Davie et al (Kriging atomic properties with a variable number of inputs, J
     Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
     '''
-    def __init__(self, docs):
+    def __init__(self, adsorbate):
         '''
         Arg:
-            docs    A list of dictionaries. Each dictionary must have the
-                    'mpid', 'adsorbate', and 'energy' keys. Should probably
-                    come from the `gaspy.gasdb.get_adsorption_docs` function.
+            adsorbate   A string indicating which adsorbate you want to
+                        make fingerprints for
         '''
-        self.docs = docs
+        self.adsorbate = adsorbate
+
+        # Get the data that we need to calculate the prerequisite information
+        self.adsorption_docs = get_adsorption_docs(adsorbates=[adsorbate])
+        self.catalog_docs = get_catalog_docs()
+
+        # Calculate the information we need to make a fingerprint
         self._calculate_dummy_fp()
-        self._calculate_max_num_species()
+        self._get_max_num_species()
+
+        # Delete some data to save memory
+        del self.adsorption_docs
+        del self.catalog_docs
 
 
     def _calculate_dummy_fp(self):
@@ -61,30 +72,13 @@ class InnerShellFingerprinter(object):
         elements = set(self.median_adsorption_energies.keys())
 
         # Calculate `dummy_fp`
-        median_energies = list(self.median_adsorption_energies.values())
-        avg_median_energy = np.average(median_energies)
+        avg_median_energy = np.average(list(self.median_adsorption_energies.values()))
         avg_atomic_num = np.average([self.mendeleev_data[element].atomic_number
                                      for element in elements])
         avg_electroneg = np.average([self.mendeleev_data[element].electronegativity(scale='pauling')
                                      for element in elements])
         dummy_count = 0
         self.dummy_fp = (avg_median_energy, avg_atomic_num, avg_electroneg, dummy_count)
-
-
-    def _calculate_max_num_species(self):
-        '''
-        When populating "dummy fingerprints", we need to know how many of them to make.
-        We set this number equal to the maximum number of elements present in any one
-        alloy in the training set, and we find this number here.
-
-        Resulting attributes:
-            max_num_species     An integer for the maximum number of elements/species
-                                present in any single mpid we are looking at. This is useful
-                                for figuring out how many dummy features you need to add.
-        '''
-        mpids = set(doc['mpid'] for doc in self.docs)
-        num_species_per_mpid = [len(self.compositions_by_mpid[mpid]) for mpid in mpids]
-        self.max_num_species = max(num_species_per_mpid)
 
 
     def _get_compositions_by_mpid(self):
@@ -97,7 +91,7 @@ class InnerShellFingerprinter(object):
             compositions_by_mpid    A dictionary whose keys are MPIDs and whose values
                                     are lists of strings for each element that is present
                                     in the corresponding material. This object is cached
-                                    and is therefore likely to have extra key:value pairings
+                                    and therefore may have extra key:value pairings
                                     that you may not need.
         '''
         # Find the current cache of compositions. If it's not there, then initialize it as an empty dict
@@ -109,8 +103,9 @@ class InnerShellFingerprinter(object):
 
         # Figure out which compositions we still need to figure out
         known_mpids = set(compositions_by_mpid.keys())
-        required_mpids = set(doc['mpid'] for doc in self.docs)
-        unknown_mpids = set(required_mpids) - known_mpids
+        required_mpids = set(doc['mpid'] for doc in self.adsorption_docs) | \
+                         set(doc['mpid'] for doc in self.catalog_docs)
+        unknown_mpids = required_mpids - known_mpids
 
         # If necessary, find the unknown compositions and save them to the cache
         if unknown_mpids:
@@ -135,27 +130,21 @@ class InnerShellFingerprinter(object):
                             `docs` and whose values are the Mendeleev data
         '''
         # Find all of the elements we want to get data for
-        mpids = set(doc['mpid'] for doc in self.docs)
         elements = []
         for mpid, composition in self.compositions_by_mpid.items():
-            if mpid in mpids:
-                elements.extend(composition)
-        all_elements = set(elements)
+            elements.extend(composition)
+        elements = set(elements)
 
         # Get the Mendeleev data for each element
-        mendeleev_data = dict.fromkeys(all_elements)
-        for element in all_elements:
+        mendeleev_data = dict.fromkeys(elements)
+        for element in mendeleev_data:
             mendeleev_data[element] = getattr(mendeleev, element)
         self.mendeleev_data = mendeleev_data
 
 
     def _calculate_median_adsorption_energies(self):
         '''
-        This method calculates the median adsorption energies on each monometallic bulk
-
-        *Note*:
-            This function uses only the data within the initial
-            `docs` argument (fed to __init__) to calculate these values.
+        This method calculates the median adsorption energies on each monometallic bulk.
 
         Resulting attribute:
             median_adsorption_energies  A dictionary whose keys are the substrate elements
@@ -163,49 +152,52 @@ class InnerShellFingerprinter(object):
                                         adsorption energy for that element (as per the
                                         doc['energy'] values in `docs`).
         '''
-        # Prerequisite information
-        docs, monometallic_elements = self._filter_out_alloys_from_docs()
+        # Figure out the elements we need to calculate energies for
+        elements = []
+        for doc in self.adsorption_docs + self.catalog_docs:
+            composition = self.compositions_by_mpid[doc['mpid']]
+            elements.extend(composition)
+        elements = set(elements)
 
         # Calculate the median adsorption energy for each element
-        median_adsorption_energies = dict.fromkeys(monometallic_elements)
-        for element in monometallic_elements:
-            energies = [doc['energy'] for doc in docs
-                        if self.compositions_by_mpid[doc['mpid']][0] == element]
+        median_adsorption_energies = dict.fromkeys(elements)
+        for element in median_adsorption_energies:
+            energies = []
+            for doc in self.adsorption_docs:
+                composition = self.compositions_by_mpid[doc['mpid']]
+                if len(composition) == 1 and composition[0] == element:
+                    energies.append(doc['energy'])
             median = np.median(energies)
 
             # Sometimes our data is sparse and yields no energies to take medians on.
             # When this happens, just take the median of all elements.
             if np.isnan(median):
-                energies = [doc['energy'] for doc in docs]
+                energies = [doc['energy'] for doc in self.adsorption_docs]
                 median = np.median(energies)
+                message = 'We do not have any energy data for %s, so we set its median adsorption energy as the median of all energies' % element
+                warnings.warn(message, RuntimeWarning)
 
             median_adsorption_energies[element] = median
         self.median_adsorption_energies = median_adsorption_energies
 
 
-    def _filter_out_alloys_from_docs(self):
+    def _get_max_num_species(self):
         '''
-        Given a list of documents with an 'mpid' key, this method
-        will return the list but with all documents removed that correspond
-        with bulk materials that have more than one element. It will also
-        return the composition key that it used to perform the filtering.
+        When populating "dummy fingerprints", we need to know how many of them to make.
+        We set this number equal to the maximum number of elements present in any one
+        alloy in the catalog, and we find this number here.
 
-        Arg:
-            docs    A list of dictionaries. Each dictionary must have the
-                    'mpid' key.
-        Outputs:
-            filtered_docs       A list that's effectivly identical to the `docs`
-                                object supplied to the user, but with alloys
-                                removed.
-            remaining_elements  A set of strings that contains the
-                                monometallics that are present in `docs`
+        Resulting attributes:
+            max_num_species     An integer for the maximum number of elements/species
+                                present in any single mpid we are looking at. This is useful
+                                for figuring out how many dummy features you need to add.
         '''
-        filtered_docs = [doc for doc in self.docs if len(self.compositions_by_mpid[doc['mpid']]) == 1]
-        remaining_elements = set(self.compositions_by_mpid[doc['mpid']][0] for doc in filtered_docs)
-        return filtered_docs, remaining_elements
+        mpids = set(doc['mpid'] for doc in self.catalog_docs)
+        num_species_per_mpid = [len(self.compositions_by_mpid[mpid]) for mpid in mpids]
+        self.max_num_species = max(num_species_per_mpid)
 
 
-    def fingerprint_docs(self, docs, flatten=True):
+    def fingerprint_docs(self, docs):
         '''
         Convert a list of documents into a list of numerical fingerprints.
 
@@ -214,25 +206,17 @@ class InnerShellFingerprinter(object):
                     The value for 'mpid' should be in the form 'mpid-23' and the value
                     for 'coordination' should be in the form 'Cu-Cu-Cu'.
                     Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
-            flatten A boolean indicating whether or not you want to flatten the
-                    output into a numpy vector, or keep it as a list of tuples.
-                    You should probably flatten it if you plan to use it, but
-                    you can not flatten it if you want to understand/view it better.
         Output:
-            chem_fps    A list of tuples. The length of the list is equal to the number
-                        of elements present in the coordination, and the length of the
-                        tuples is 4. The first value in each tuple is the median
-                        adsorption energy; the second value is the atomic number;
-                        the third value is the Pauling electronegativity; and the last
-                        number is the count of that element in the coordination site.
-                        If `flatten == True`, then each fingerprint will be flattened into a
-                        1-dimensional numpy array.
+            chem_fps    A list of numpy.array objects. Each numpy array is a
+                        numerical representation of each document that you gave this
+                        method, as per the docstring of this class. Note that
+                        the array is actually a flattened, 1-dimensional object.
         '''
-        chem_fps = [self.fingerprint_doc(doc, flatten=flatten) for doc in docs]
+        chem_fps = [self.fingerprint_doc(doc) for doc in docs]
         return chem_fps
 
 
-    def fingerprint_doc(self, doc, flatten=True):
+    def fingerprint_doc(self, doc):
         '''
         Convert a document into a numerical fingerprint.
 
@@ -241,53 +225,31 @@ class InnerShellFingerprinter(object):
                     The value for 'mpid' should be in the form 'mpid-23' and the value
                     for 'coordination' should be in the form 'Cu-Cu-Cu'.
                     Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
-            flatten A boolean indicating whether or not you want to flatten the
-                    output into a numpy vector, or keep it as a list of tuples.
-                    You should probably flatten it if you plan to use it, but
-                    you can not flatten it if you want to understand/view it better.
         Output:
-            chem_fp A list of tuples. The length of the list is equal to the number
-                    of elements present in the coordination, and the length of the
-                    tuples is 4. The first value in each tuple is the median
-                    adsorption energy; the second value is the atomic number;
-                    the third value is the Pauling electronegativity; and the last
-                    number is the count of that element in the coordination site.
-                    If `flatten == True`, then this will be flattened into a
-                    1-dimensional numpy array.
+            chem_fp     A numpy.array object that is a numerical representation the
+                        document that you gave this method, as per the docstring of
+                        this class. Note that the array is actually a flattened,
+                        1-dimensional object.
         '''
         chem_fp = []
         binding_atoms = doc['coordination'].split('-')
 
-        # Sometimes there is no coordination. If this happens,
-        # then hackily fix it
+        # Sometimes there is no coordination. If this happens, then hackily fix it
         if binding_atoms == ['']:
-            binding_atoms = set()
+            binding_atoms = []
 
         # Add and sort the elemental information for each element present
         for element in set(binding_atoms):
-            try:
-                element_data = self.mendeleev_data[element]
-                energy = self.median_adsorption_energies[element]
-                atomic_number = element_data.atomic_number
-                electronegativity = element_data.electronegativity(scale='pauling')
-                count = binding_atoms.count(element)
-                chem_fp.append((energy, atomic_number, electronegativity, count))
-
-            # Tell the user if they tried to predict outside of their test space
-            except KeyError as error:
-                import sys
-                extra_message = ' because probably tried to fingerprint an element that was not in the training set'
-                raise type(error)(str(error) + extra_message).with_traceback(sys.exc_info()[2])
-
+            energy = self.median_adsorption_energies[element]
+            element_data = self.mendeleev_data[element]
+            atomic_number = element_data.atomic_number
+            electronegativity = element_data.electronegativity(scale='pauling')
+            count = binding_atoms.count(element)
+            chem_fp.append((energy, atomic_number, electronegativity, count))
         chem_fp = sorted(chem_fp)
 
         # Fill in the dummy fingerprints
         for _ in range(len(chem_fp), self.max_num_species):
             chem_fp.append(self.dummy_fp)
 
-        # Format and flatten the data (if needed)
-        chem_fp = np.array(chem_fp)
-        if flatten:
-            chem_fp = chem_fp.flatten()
-
-        return chem_fp
+        return np.array(chem_fp).flatten()
