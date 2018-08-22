@@ -13,7 +13,8 @@ os.environ['PYTHONPATH'] = '/home/GASpy/gaspy/tests:' + os.environ['PYTHONPATH']
 # Things we're testing
 from ..fingerprinters import Fingerprinter, \
     InnerShellFingerprinter, \
-    OuterShellFingerprinter
+    OuterShellFingerprinter, \
+    StackedFingerprinter
 
 # Things we need to do the tests
 import os
@@ -21,12 +22,13 @@ import pytest
 import numpy.testing as npt
 import pickle
 import json
+import numpy as np
 import mendeleev
 from pymatgen.ext.matproj import MPRester
-from gaspy.gasdb import get_catalog_docs
+from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
 from gaspy.utils import read_rc
 
-REGRESSION_BASELINES_LOCATION = '/home/GASpy/GASpy_regressions/gaspy_regress/tests/regression_baselines/fingerprints/'
+REGRESSION_BASELINES_LOCATION = '/home/GASpy/GASpy_regressions/gaspy_regress/tests/regression_baselines/fingerprinters/'
 
 
 @pytest.fixture(params=['CO', 'H'], scope='module')
@@ -108,6 +110,20 @@ class TestFingerprinter(object):
                 expected_composition = list(entry.as_dict()['composition'].keys())
                 assert compositions_by_mpid[mpid] == expected_composition
 
+
+    def test__get_elements_in_scope(self, fingerprinting_fixture):
+        fingerprinter, adsorbate = fingerprinting_fixture
+        elements = fingerprinter.elements
+
+        required_mpids = set(doc['mpid'] for doc in get_adsorption_docs(adsorbates=[adsorbate])) | \
+                         set(doc['mpid'] for doc in get_catalog_docs())
+        expected_elements = []
+        for mpid in required_mpids:
+            composition = fingerprinter.compositions_by_mpid[mpid]
+            expected_elements.extend(composition)
+        expected_elements = set(expected_elements)
+
+        assert expected_elements.issubset(elements)
 
     def test__get_mendeleev_data(self, fingerprinting_fixture):
         fingerprinter, _ = fingerprinting_fixture
@@ -247,3 +263,30 @@ class TestOuterShellFingerprinter(object):
             expected_fingerprints = pickle.load(file_handle)
         for fingerprint, expected_fingerprint in zip(fingerprints, expected_fingerprints):
             npt.assert_allclose(fingerprint, expected_fingerprint)
+
+
+@pytest.mark.parametrize('fingerprinters,collection_to_fp',
+                         [((InnerShellFingerprinter('CO'), OuterShellFingerprinter('CO')), 'adsorption'),
+                          ((InnerShellFingerprinter('H'), OuterShellFingerprinter('H')), 'adsorption'),
+                          ((InnerShellFingerprinter('CO'), OuterShellFingerprinter('CO')), 'catalog'),
+                          ((InnerShellFingerprinter('H'), OuterShellFingerprinter('H')), 'catalog')])
+def test_StackedFingerprinter(fingerprinters, collection_to_fp):
+    '''
+    Note that the argument `fingerprinters` can be a tuple of any size.
+    In other words:  We hope to be able to stack any number of fingerprinters.
+    '''
+    # Get the test cases that we'll be fingerprinting
+    if collection_to_fp == 'adsorption':
+        docs = get_adsorption_docs()
+    elif collection_to_fp == 'catalog':
+        docs = get_catalog_docs()
+
+    # Call the function we're testing
+    stacked_fingerprinter = StackedFingerprinter(*fingerprinters)
+    stacked_fingerprints = stacked_fingerprinter.fingerprint_docs(docs)
+
+    # Compare to what we expect it to be
+    tupled_fingerprints = tuple(fingerprinter.fingerprint_docs(docs)
+                                for fingerprinter in fingerprinters)
+    expected_stacked_fingerprints = np.concatenate(tupled_fingerprints, axis=1)
+    npt.assert_allclose(stacked_fingerprints, expected_stacked_fingerprints)
