@@ -11,7 +11,7 @@ import os
 os.environ['PYTHONPATH'] = '/home/GASpy/gaspy/tests:' + os.environ['PYTHONPATH']
 
 # Things we're testing
-from ..fingerprints import Fingerprinter, \
+from ..fingerprinters import Fingerprinter, \
     InnerShellFingerprinter, \
     OuterShellFingerprinter
 
