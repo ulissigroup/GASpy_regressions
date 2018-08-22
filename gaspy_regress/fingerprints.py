@@ -16,22 +16,16 @@ from gaspy.utils import read_rc
 from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
 
 
-class InnerShellFingerprinter(object):
+class Fingerprinter(object):
     '''
-    This fingerprinter converts the "inner shell" atoms---i.e., the coordinated
-    atoms---into a Nx4 array of numbers, where N is the maximum number of
-    elements seen in any of the inner shells all sites in the catalog. Each 1x4
-    vector corresponds to one of the elements present in this inner shell. The
-    numbers in the 1x4 vectors are the element's median adsorption energy, its
-    atomic number, its Pauling electronegativity, and the number of those
-    elements that show up in the coordination. We also sort the 1x4 vectors
-    such that the first 1x4 vector that shows up is the one with the lowest
-    median adsorption energy.
+    This is a template fingerprinter that is meant to be extended before using.
+    It needs one more method, `fingerprint_doc`, before being usable.
 
-    We also use "dummy" vectors to address the fact that we will have a
-    variable number of features/elements present in the inner shell; reference
-    Davie et al (Kriging atomic properties with a variable number of inputs, J
-    Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
+    The especially useful attributes that this class has are `dummy_fp`,
+    `max_num_species`, `median_adsorption_energies`, and `mendeleev_data`.
+    For more details on what they are, refer to the respective methods.
+
+    Refer to Tran & Ulissi (Nature Catalysis, 2018) for even more details.
     '''
     def __init__(self, adsorbate):
         '''
@@ -56,14 +50,21 @@ class InnerShellFingerprinter(object):
 
     def _calculate_dummy_fp(self):
         '''
-        This method establishes a "dummy" value for the 1x4 vector of information.
+        This method establishes a "dummy" value for a 1x4 vector of
+        information. The numbers in the 1x4 vector is average of all the median
+        adsorption energies we have between a given adsorbate and various
+        monometallics, the average atomic number of all elements we're
+        considering, their average Pauling electronegativity, and an atomic
+        count of zero.
+
         This dummy value is useful when using variable number of features;
-        reference Davie et al (Kriging atomic properties with a variable number of inputs,
-        J Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
+        reference Davie et al (Kriging atomic properties with a variable number
+        of inputs, J Chem Phys 2016). The out-of-bounds feature we choose is
+        the atomic count.
 
         Resulting attributes:
-            dummy_fp            A tuple that represents a single chemfp0 fingerprint,
-                                but has the "dummy" values
+            dummy_fp    A 4-tuple that represents a single fingerprint,
+                        but has the "dummy" values
         '''
         # Prerequisite calculations
         self._get_compositions_by_mpid()
@@ -216,6 +217,23 @@ class InnerShellFingerprinter(object):
         return chem_fps
 
 
+class InnerShellFingerprinter(Fingerprinter):
+    '''
+    This fingerprinter converts the "inner shell" atoms---i.e., the coordinated
+    atoms---into a Nx4 array of numbers, where N is the maximum number of
+    elements seen in any of the inner shells all sites in the catalog. Each 1x4
+    vector corresponds to one of the elements present in this inner shell. The
+    numbers in the 1x4 vectors are the element's median adsorption energy, its
+    atomic number, its Pauling electronegativity, and the number of those
+    elements that show up in the coordination. We also sort the 1x4 vectors
+    such that the first 1x4 vector that shows up is the one with the lowest
+    median adsorption energy.
+
+    We also use "dummy" vectors to address the fact that we will have a
+    variable number of features/elements present in the inner shell; reference
+    Davie et al (Kriging atomic properties with a variable number of inputs, J
+    Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
+    '''
     def fingerprint_doc(self, doc):
         '''
         Convert a document into a numerical fingerprint.
@@ -226,15 +244,15 @@ class InnerShellFingerprinter(object):
                     for 'coordination' should be in the form 'Cu-Cu-Cu'.
                     Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
         Output:
-            chem_fp     A numpy.array object that is a numerical representation the
+            fingerprint A numpy.array object that is a numerical representation the
                         document that you gave this method, as per the docstring of
                         this class. Note that the array is actually a flattened,
                         1-dimensional object.
         '''
-        chem_fp = []
+        fingerprint = []
         binding_atoms = doc['coordination'].split('-')
 
-        # Sometimes there is no coordination. If this happens, then hackily fix it
+        # Sometimes there is no coordination. If this happens, then hackily reformat it
         if binding_atoms == ['']:
             binding_atoms = []
 
@@ -245,11 +263,92 @@ class InnerShellFingerprinter(object):
             atomic_number = element_data.atomic_number
             electronegativity = element_data.electronegativity(scale='pauling')
             count = binding_atoms.count(element)
-            chem_fp.append((energy, atomic_number, electronegativity, count))
-        chem_fp = sorted(chem_fp)
+            fingerprint.append((energy, atomic_number, electronegativity, count))
+        fingerprint = sorted(fingerprint)
 
         # Fill in the dummy fingerprints
-        for _ in range(len(chem_fp), self.max_num_species):
-            chem_fp.append(self.dummy_fp)
+        for _ in range(len(fingerprint), self.max_num_species):
+            fingerprint.append(self.dummy_fp)
 
-        return np.array(chem_fp).flatten()
+        return np.array(fingerprint).flatten()
+
+
+class OuterShellFingerprinter(Fingerprinter):
+    '''
+    This fingerprinter converts the "outer shell" atoms---i.e., the next neighbor
+    atoms---into a Nx4 array of numbers, where N is the maximum number of
+    elements seen in any of the outer shells all sites in the catalog. Each 1x4
+    vector corresponds to one of the elements present in this outer shell. The
+    numbers in the 1x4 vectors are the element's median adsorption energy, its
+    atomic number, its Pauling electronegativity, and the sum of the number
+    of times that the element shows up as being coordinated with a binding atom.
+    We also sort the 1x4 vectors such that the first 1x4 vector that shows up is
+    the one with the lowest median adsorption energy.
+
+    We also use "dummy" vectors to address the fact that we will have a
+    variable number of features/elements present in the outer shell; reference
+    Davie et al (Kriging atomic properties with a variable number of inputs, J
+    Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
+    '''
+    def fingerprint_doc(self, doc):
+        '''
+        Convert a document into a numerical fingerprint.
+
+        Inputs:
+            doc     A dictionary that should have the keys 'mpid' and 'coordination'.
+                    The value for 'mpid' should be in the form 'mpid-23' and the value
+                    for 'coordination' should be in the form 'Cu-Cu-Cu'.
+                    Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
+        Output:
+            fingerprint A numpy.array object that is a numerical representation the
+                        document that you gave this method, as per the docstring of
+                        this class. Note that the array is actually a flattened,
+                        1-dimensional object.
+        '''
+        fingerprint = []
+        second_shell_atoms = self._concatenate_second_shell(doc)
+
+        # Add and sort the elemental information for each element present
+        for element in set(second_shell_atoms):
+            energy = self.median_adsorption_energies[element]
+            element_data = self.mendeleev_data[element]
+            atomic_number = element_data.atomic_number
+            electronegativity = element_data.electronegativity(scale='pauling')
+            count = second_shell_atoms.count(element)
+            fingerprint.append((energy, atomic_number, electronegativity, count))
+        fingerprint = sorted(fingerprint)
+
+        # Fill in the dummy fingerprints
+        for _ in range(len(fingerprint), self.max_num_species):
+            fingerprint.append(self.dummy_fp)
+
+        return np.array(fingerprint).flatten()
+
+
+    @staticmethod
+    def _concatenate_second_shell(doc):
+        '''
+        This is a helper method to parse a neighborcoord string and
+        concatenate all of the neighbors of the binding atoms together.  Note
+        that the counting that we do here allows for redundant counting of
+        atoms. In other words:  If an atom is bound to three different binding
+        atoms, then it will show up in this method's output three times.
+
+        Arg:
+            doc     A dictionary with the 'neighborcoord' string, whose contents
+                    should look like:
+                        ['Cu:',
+                         'Al:']
+        Returns:
+            second_shell_atoms  An extended list of the coordinations of all
+                                binding atoms. Continiuing from the example
+                                shown in the description for the `doc` argument,
+                                we would get:
+                                ['Cu', 'Cu', 'Cu', 'Cu', 'Cu', Al, 'Cu', 'Cu', 'Cu', 'Cu', 'Cu', 'Cu']
+        '''
+        second_shell_atoms = []
+        for neighbor_coordination in doc['neighborcoord']:
+            _, coordination = neighbor_coordination.split(':')
+            coordination = coordination.split('-')
+            second_shell_atoms.extend(coordination)
+        return second_shell_atoms
