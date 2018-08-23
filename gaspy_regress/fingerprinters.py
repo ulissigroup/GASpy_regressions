@@ -10,7 +10,9 @@ __email__ = 'ktran@andrew.cmu.edu'
 import warnings
 import pickle
 import numpy as np
-import mendeleev
+with warnings.catch_warnings():
+    warnings.filterwarnings('ignore', message='numpy.dtype size changed')
+    import mendeleev
 from pymatgen.ext.matproj import MPRester
 from gaspy.utils import read_rc
 from gaspy.gasdb import get_adsorption_docs, get_catalog_docs

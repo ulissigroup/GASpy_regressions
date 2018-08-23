@@ -23,7 +23,10 @@ import numpy.testing as npt
 import pickle
 import json
 import numpy as np
-import mendeleev
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings('ignore', message='numpy.dtype size changed')
+    import mendeleev
 from pymatgen.ext.matproj import MPRester
 from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
 from gaspy.utils import read_rc
