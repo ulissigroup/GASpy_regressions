@@ -100,7 +100,7 @@ class Fingerprinter(object):
         '''
         # Find the current cache of compositions. If it's not there, then initialize it as an empty dict
         try:
-            with open('/home/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'rb') as file_handle:
+            with open('/home/jovyan/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'rb') as file_handle:
                 compositions_by_mpid = pickle.load(file_handle)
         except FileNotFoundError:
             compositions_by_mpid = {}
@@ -118,7 +118,7 @@ class Fingerprinter(object):
                     entry = rester.get_entry_by_material_id({'task_ids': mpid})
                     composition = entry.as_dict()['composition']
                     compositions_by_mpid[mpid] = list(composition.keys())
-            with open('/home/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'wb') as file_handle:
+            with open('/home/jovyan/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'wb') as file_handle:
                 pickle.dump(compositions_by_mpid, file_handle)
 
         self.compositions_by_mpid = compositions_by_mpid
