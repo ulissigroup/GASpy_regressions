@@ -8,13 +8,13 @@ __email__ = 'ktran@andrew.cmu.edu'
 # Modify the python path so that we find/use the .gaspyrc.json in the testing
 # folder instead of the main folder
 import os
-os.environ['PYTHONPATH'] = '/home/GASpy/gaspy/tests:' + os.environ['PYTHONPATH']
+os.environ['PYTHONPATH'] = '/home/jovyan/GASpy/gaspy/tests:' + os.environ['PYTHONPATH']
 
 # Things we're testing
-from ..fingerprinters import Fingerprinter, \
-    InnerShellFingerprinter, \
-    OuterShellFingerprinter, \
-    StackedFingerprinter
+from ..fingerprinters import (Fingerprinter,
+                              InnerShellFingerprinter,
+                              OuterShellFingerprinter,
+                              StackedFingerprinter)
 
 # Things we need to do the tests
 import os
@@ -31,7 +31,7 @@ from pymatgen.ext.matproj import MPRester
 from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
 from gaspy.utils import read_rc
 
-REGRESSION_BASELINES_LOCATION = '/home/GASpy/GASpy_regressions/gaspy_regress/tests/regression_baselines/fingerprinters/'
+REGRESSION_BASELINES_LOCATION = '/home/jovyan/GASpy/GASpy_regressions/gaspy_regress/tests/regression_baselines/fingerprinters/'
 
 
 @pytest.fixture(params=['CO', 'H'], scope='module')
@@ -44,7 +44,7 @@ def fingerprinting_fixture(request):
     try:
         # Remove the cache to make sure that the new instance of the fingerprinter
         # is the one that's actually making the cache correctly
-        os.remove('/home/GASpy/GASpy_regressions/cache/mp_comp_data.pkl')
+        os.remove('/home/jovyan/GASpy/GASpy_regressions/cache/mp_comp_data.pkl')
     except OSError:
         pass
 
@@ -83,7 +83,8 @@ class TestFingerprinter(object):
         cache_location = REGRESSION_BASELINES_LOCATION + 'dummy_fp_%s.pkl' % adsorbate
         with open(cache_location, 'rb') as file_handle:
             expected_dummy_fp = pickle.load(file_handle)
-        assert dummy_fp == expected_dummy_fp
+        for value, expected_value in zip(dummy_fp, expected_dummy_fp):
+            assert round(value, 7) == round(expected_value, 7)
 
 
     def test__get_compositions_by_mpid(self, fingerprinting_fixture):
@@ -96,7 +97,7 @@ class TestFingerprinter(object):
         fingerprinter, _ = fingerprinting_fixture
 
         # Make sure that we saved the object correctly
-        with open('/home/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'rb') as file_handle:
+        with open('/home/jovyan/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'rb') as file_handle:
             saved_compositions_by_mpid = pickle.load(file_handle)
         compositions_by_mpid = fingerprinter.compositions_by_mpid
         assert compositions_by_mpid == saved_compositions_by_mpid
