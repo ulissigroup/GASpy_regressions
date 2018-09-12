@@ -6,7 +6,7 @@
 # Establish out how to mount GASpy to the container. This is the part
 # that assumes that you are running this script inside GASpy.
 gaspy_path=$(pwd)
-gaspy_mounting_config="$gaspy_path:/home/GASpy"
+gaspy_mounting_config="$gaspy_path:/home/joyvan/GASpy"
 
 # Now open the container
 shifter --image=ulissigroup/gaspy_regressions:v0.20 --volume=$gaspy_mounting_config bash -i

@@ -12,25 +12,22 @@ jupyter=${1:-0}
 # which should be inside GASpy
 gaspy_regressions_path=$(pwd)
 gaspy_path="$(dirname "$gaspy_regressions_path")"
-gaspy_mounting_config="$gaspy_path:/home/GASpy"
+gaspy_mounting_config="$gaspy_path:/home/joyvan/GASpy"
 
 # Create a container from the image
 #   -it     run interactively
 #   --rm    close the container when we exit
 #   -p      connect to the default port used by Jupyter
-#   -w      The container directory to start in
 #   -v      mount various things to the container
 if [ $jupyter = "jupyter" ]; then
-    docker run -it --rm -w "/home" \
+    docker run -it --rm -w "/home/joyvan/GASpy" \
         -p 8888:8888 \
-        -v $ssh_mounting_config \
         -v $gaspy_mounting_config \
-        ulissigroup/gaspy_regressions:v0.20 \
+        ulissigroup/gaspy_regressions:dev \
         jupyter
 else
-    docker run -it --rm -w "/home" \
-        -v $ssh_mounting_config \
+    docker run -it --rm -w "/home/joyvan/GASpy" \
         -v $gaspy_mounting_config \
-        ulissigroup/gaspy_regressions:v0.20 \
+        ulissigroup/gaspy_regressions:dev \
         /bin/bash
 fi
