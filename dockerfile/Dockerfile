@@ -26,13 +26,15 @@ RUN conda install \
     luigi=2.7.8 \
     plotly=3.2.0 \
     pytorch=0.4.1  torchvision=0.2.1 \
-    deap=1.2.2  update_checker=0.16 tqdm=4.24.0 stopit=1.1.2 xgboost=0.80 \
-    nltk=3.2.5  gensim=3.5.0
+    deap=1.2.2  update_checker=0.16 tqdm=4.24.0 stopit=1.1.2 xgboost=0.80
 
 # Pip installations go last, because pip often messes things up.
 RUN pip install tpot
-RUN pip install --no-dependencies git+https://github.com/inspirehep/magpie.git@v2.0
 RUN pip install git+https://github.com/rossant/ipycache.git
+
+# Manually install Magpie
+RUN git clone https://github.com/ulissigroup/magpie_python.git
+ENV PYTHONPATH $PYTHONPATH:$HOME/magpie_python
 
 # The $GASPY_HOME mount is so that you can use whatever version of GASpy.
 # We do this near the end because we can't modify mounted folders after
