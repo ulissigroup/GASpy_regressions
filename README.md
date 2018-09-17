@@ -1,78 +1,37 @@
 # GASpy Regressions
 
-## Purpose
-[GASpy](https://github.com/ktran9891/GASpy) is able to create various
-catalyst-adsorbate systems and then use DFT to simulate the adsorption energies
-of these systems. This repository, which is meant to be a submodule of GASpy,
-analyzes GASpy's results in order to
+[GASpy](https://github.com/ulissigroup/GASpy/tree/v0.1) is able to create
+various catalyst-adsorbate systems and then use DFT to simulate the adsorption
+energies of these systems.
+[GASpy_regressions](https://github.com/ktran9891/GASpy_regressions) analyzes
+GASpy's results to create surrogate models that can make predictions on DFT
+calculations that we have not yet performed. We then store these predictions in
+the Mongo collections that we set up in GASpy. Refer to our
+[Jupyter](http://jupyter.org/)
+[notebooks](https://github.com/ulissigroup/GASpy_regressions/tree/master/notebooks)
+for examples/specifics.
 
-1. Create surrogate models to identify potentially high-performing catalysts
-2. Analyze/visualize GASpy's DFT data and the surrogate models' data
+# Installation
 
-## Overview
-The main bread and butter of this submodule is the `GAspyRegressor` class
-inside the `regressor.py` module. You instantiate this class by passing it
-filter settings for it to pull and parse GASdb data from our Mongo DB. You then
-use one of the `GASpyRegressor.fit_*` methods to perform the regression.
-Afterwards, you may pass parsed mongo documents to the
-`GASpy_regressor.predict` method to make predictions. You can get these parsed
-mongo documents from the `gaspy.gasdb.get_docs` function.
+You will need to first install GASpy. Then to use GASpy_regressions, you will need
+to make sure that this repository is cloned into your local repository of GASpy
+as a [submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules). Then run
+via Docker, e.g. `docker run -v "/local/path/to/GASpy:/home/GASpy"
+ulissigroup/gaspy_regressions:latest foo`.
 
-These models may be combined with
-[GASpy_predict](https://github.com/ktran9891/GASpy_predict) and GASpy to create
-automated, active learing loops of DFT-simulation, surrogate model regression,
-prediction, and more DFT-simulation. To facilitate this active learning, we
-create models by executing the `scripts/model.sh` script to create a surrogate
-model and then we execute the `scripts/predict.sh` script to make
-ML-predictions on our catalog of sites using that model. To keep things
-up-to-date and "online", we execute the `model.sh` and `predict.sh` scripts
-daily via cron. For illustrative purposes, the `modeling.ipynb` Jupyter
-notebook in the `notebooks` folder shows how exactly we perform the regression.
+# Reference
 
-We also have a couple of other files in the `notebooks` folder that show how we
-do some other analyses on our regression methods and database of energies.
+[Active learning across intermetallics to guide discovery of electrocatalysts
+for CO2 reduction and H2
+evolution](https://www.nature.com/articles/s41929-018-0142-1). Note that the
+repository which we reference in this paper is version 0.1 of GASpy_feedback,
+which can stil be found
+[here](https://github.com/ulissigroup/GASpy_regressions/tree/v0.1).
 
-## Installation
-Remember to add the repo to your Python path. The module importing assumes that
-you have GASpy in your Python path. You can do so by putting the following in
-your `.bashrc`:
-```
-export PYTHONPATH="/path/to/GASpy/GASpy_regressions:${PYTHONPATH}"
-```
+# Versions
 
-In addition to the packages that GASpy requires, you will need the following
-Python packages installed:
-```
-_nb_ext_conf              0.3.0
-bokeh                     0.12.10
-datashader                0.6.2
-datashape                 0.5.4
-ipaddress                 1.0.19
-ipycache                  0.1.4
-ipykernel                 4.6.1
-ipyparallel               6.0.2
-ipython                   5.5.0
-ipython_genutils          0.2.0
-ipywidgets                6.0.0
-jupyter-console           5.2.0
-jupyter_client            5.0.1
-jupyter_contrib_core      0.3.3
-jupyter_contrib_nbextensions 0.4.0
-jupyter_core              4.3.0
-jupyter_highlight_selected_word 0.1.0
-jupyter_latex_envs        1.4.0
-jupyter_nbextensions_configurator 0.4.0
-matplotlib                2.0.0
-nb_anacondacloud          1.2.0
-nb_conda                  2.0.0
-nb_conda_kernels          2.0.0
-nbconvert                 5.1.1
-nbformat                  4.3.0
-nbpresent                 3.0.2
-notebook                  5.0.0
-plotly                    2.2.2
-scikit-learn              0.19.0
-seaborn                   0.8.1
-tpot                      0.9.1
-TPOT                      0.8.3
-```
+Current GASpy_regressions version: 0.20
+
+For an up-to-date list of our software dependencies, you can simply check out
+how we build our docker image
+[here](https://github.com/ulissigroup/GASpy_regressions/blob/master/dockerfile/Dockerfile).
