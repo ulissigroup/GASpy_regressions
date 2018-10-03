@@ -22,6 +22,7 @@ RUN conda install \
     multiprocess=0.70.5 \
     ase=3.16.2 \
     pymatgen=2018.9.1 \
+    fireworks=1.7.2 \
     mendeleev=0.4.3 \
     luigi=2.7.8 \
     plotly=3.2.0 \
