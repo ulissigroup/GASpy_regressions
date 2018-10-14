@@ -10,35 +10,53 @@ __email__ = 'ktran@andrew.cmu.edu'
 import warnings
 import pickle
 import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
 with warnings.catch_warnings():
     warnings.filterwarnings('ignore', message='numpy.dtype size changed')
     import mendeleev
 from pymatgen.ext.matproj import MPRester
 from gaspy.utils import read_rc
-from gaspy.gasdb import get_adsorption_docs, get_catalog_docs
+from gaspy.gasdb import get_catalog_docs
+
+CACHE_LOCATION = read_rc('gasdb_path')
 
 
-class Fingerprinter(object):
+class Fingerprinter(BaseEstimator, TransformerMixin):
     '''
     This is a template fingerprinter that is meant to be extended before using.
-    It needs one more method, `fingerprint_doc`, before being usable.
+    It is meant to be extended, and needs a `transform` method.
 
-    The especially useful attributes that this class has are `dummy_fp`,
-    `max_num_species`, `median_adsorption_energies`, and `mendeleev_data`.
+    The especially useful attributes that this class has are `dummy_fp_`,
+    `max_num_species_`, `median_adsorption_energies_`, and `mendeleev_data_`.
     For more details on what they are, refer to the respective methods.
 
     Refer to Tran & Ulissi (Nature Catalysis, 2018) for even more details.
     '''
-    def __init__(self, adsorbate):
-        '''
-        Arg:
-            adsorbate   A string indicating which adsorbate you want to
-                        make fingerprints for
-        '''
-        self.adsorbate = adsorbate
+    def __init__(self):
+        pass
 
+
+    def fit(self, X, y=None):
+        '''
+        This method behaves as a `fit` method from SKLearn would:  given
+        training data, it calculates and assigns the attributes needed
+        to run the `transform` method.
+
+        Args:
+            X   A list of dictionaries that should be fetched using the
+                `gaspy.gasdb.get_adsorption_docs` function. You can
+                change the filter used to get the documents, but you
+                probably shouldn't remove any fingerprints unless you
+                know what you're doing.
+            y   Argument required to be able to fit within
+                the SKLearn framework. You should ignore this argument
+                and not pass anything to it.
+
+        Returns:
+            self
+        '''
         # Get the data that we need to calculate the prerequisite information
-        self.adsorption_docs = get_adsorption_docs(adsorbates=[adsorbate])
+        self.adsorption_docs = X
         self.catalog_docs = get_catalog_docs()
 
         # Calculate the information we need to make a fingerprint
@@ -48,6 +66,34 @@ class Fingerprinter(object):
         # Delete some data to save memory
         del self.adsorption_docs
         del self.catalog_docs
+
+        return self
+
+
+    def fit_transform(self, X, y=None):
+        '''
+        This method behaves as a `fit_transform` method from SKLearn would:
+        given training data, it calculates and assigns the attributes needed
+        to run the `transform` method. It then returns the transformation
+        of the training data.
+
+        Args:
+            X   A list of dictionaries that should be fetched using the
+                `gaspy.gasdb.get_adsorption_docs` function. You can
+                change the filter used to get the documents, but you
+                probably shouldn't remove any fingerprints unless you
+                know what you're doing.
+            y   Argument required to be able to fit within
+                the SKLearn framework. You should ignore this argument
+                and not pass anything to it.
+        Returns:
+            fingerprints    A numpy.array object that is a numerical representation the
+                            documents that you gave this method, as per the docstring of
+                            this class.
+        '''
+        self.fit(X, y=y)
+        fingerprints = self.transform(X)
+        return fingerprints
 
 
     def _calculate_dummy_fp(self):
@@ -65,7 +111,7 @@ class Fingerprinter(object):
         the atomic count.
 
         Resulting attributes:
-            dummy_fp    A 4-tuple that represents a single fingerprint,
+            dummy_fp_   A 4-tuple that represents a single fingerprint,
                         but has the "dummy" values
         '''
         # Prerequisite calculations
@@ -73,16 +119,16 @@ class Fingerprinter(object):
         self._get_elements_in_scope()
         self._get_mendeleev_data()
         self._calculate_median_adsorption_energies()
-        elements = set(self.median_adsorption_energies.keys())
+        elements = set(self.median_adsorption_energies_.keys())
 
-        # Calculate `dummy_fp`
-        avg_median_energy = np.average(list(self.median_adsorption_energies.values()))
-        avg_atomic_num = np.average([self.mendeleev_data[element].atomic_number
+        # Calculate `dummy_fp_`
+        avg_median_energy = np.average(list(self.median_adsorption_energies_.values()))
+        avg_atomic_num = np.average([self.mendeleev_data_[element].atomic_number
                                      for element in elements])
-        avg_electroneg = np.average([self.mendeleev_data[element].electronegativity(scale='pauling')
+        avg_electroneg = np.average([self.mendeleev_data_[element].electronegativity(scale='pauling')
                                      for element in elements])
         dummy_count = 0
-        self.dummy_fp = (avg_median_energy, avg_atomic_num, avg_electroneg, dummy_count)
+        self.dummy_fp_ = (avg_median_energy, avg_atomic_num, avg_electroneg, dummy_count)
 
 
     def _get_compositions_by_mpid(self):
@@ -92,7 +138,7 @@ class Fingerprinter(object):
         cache the results and modify the cache as necessary.
 
         Resulting attribute:
-            compositions_by_mpid    A dictionary whose keys are MPIDs and whose values
+            compositions_by_mpid_   A dictionary whose keys are MPIDs and whose values
                                     are lists of strings for each element that is present
                                     in the corresponding material. This object is cached
                                     and therefore may have extra key:value pairings
@@ -100,7 +146,7 @@ class Fingerprinter(object):
         '''
         # Find the current cache of compositions. If it's not there, then initialize it as an empty dict
         try:
-            with open('/home/jovyan/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'rb') as file_handle:
+            with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'rb') as file_handle:
                 compositions_by_mpid = pickle.load(file_handle)
         except FileNotFoundError:
             compositions_by_mpid = {}
@@ -118,10 +164,10 @@ class Fingerprinter(object):
                     entry = rester.get_entry_by_material_id({'task_ids': mpid})
                     composition = entry.as_dict()['composition']
                     compositions_by_mpid[mpid] = list(composition.keys())
-            with open('/home/jovyan/GASpy/GASpy_regressions/cache/mp_comp_data.pkl', 'wb') as file_handle:
+            with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'wb') as file_handle:
                 pickle.dump(compositions_by_mpid, file_handle)
 
-        self.compositions_by_mpid = compositions_by_mpid
+        self.compositions_by_mpid_ = compositions_by_mpid
 
 
     def _get_elements_in_scope(self):
@@ -139,9 +185,9 @@ class Fingerprinter(object):
                         and adsorption collections.
         '''
         elements = []
-        for mpid, composition in self.compositions_by_mpid.items():
+        for mpid, composition in self.compositions_by_mpid_.items():
             elements.extend(composition)
-        self.elements = set(elements)
+        self.elements_ = set(elements)
 
 
     def _get_mendeleev_data(self):
@@ -154,10 +200,10 @@ class Fingerprinter(object):
                             `docs` and whose values are the Mendeleev data
         '''
         # Get the Mendeleev data for each element
-        mendeleev_data = dict.fromkeys(self.elements)
+        mendeleev_data = dict.fromkeys(self.elements_)
         for element in mendeleev_data:
             mendeleev_data[element] = getattr(mendeleev, element)
-        self.mendeleev_data = mendeleev_data
+        self.mendeleev_data_ = mendeleev_data
 
 
     def _calculate_median_adsorption_energies(self):
@@ -165,17 +211,17 @@ class Fingerprinter(object):
         This method calculates the median adsorption energies on each monometallic bulk.
 
         Resulting attribute:
-            median_adsorption_energies  A dictionary whose keys are the substrate elements
+            median_adsorption_energies_ A dictionary whose keys are the substrate elements
                                         found in `docs` and whose values are the median
                                         adsorption energy for that element (as per the
                                         doc['energy'] values in `docs`).
         '''
         # Calculate the median adsorption energy for each element
-        median_adsorption_energies = dict.fromkeys(self.elements)
+        median_adsorption_energies = dict.fromkeys(self.elements_)
         for element in median_adsorption_energies:
             energies = []
             for doc in self.adsorption_docs:
-                composition = self.compositions_by_mpid[doc['mpid']]
+                composition = self.compositions_by_mpid_[doc['mpid']]
                 if len(composition) == 1 and composition[0] == element:
                     energies.append(doc['energy'])
             median = np.median(energies)
@@ -185,11 +231,12 @@ class Fingerprinter(object):
             if np.isnan(median):
                 energies = [doc['energy'] for doc in self.adsorption_docs]
                 median = np.median(energies)
-                message = 'We do not have any energy data for %s, so we set its median adsorption energy as the median of all energies' % element
+                message = ('We do not have any energy data for %s, so we set its median '
+                           'adsorption energy as the median of all energies' % element)
                 warnings.warn(message, RuntimeWarning)
 
             median_adsorption_energies[element] = median
-        self.median_adsorption_energies = median_adsorption_energies
+        self.median_adsorption_energies_ = median_adsorption_energies
 
 
     def _get_max_num_species(self):
@@ -199,32 +246,13 @@ class Fingerprinter(object):
         alloy in the catalog, and we find this number here.
 
         Resulting attributes:
-            max_num_species     An integer for the maximum number of elements/species
+            max_num_species_    An integer for the maximum number of elements/species
                                 present in any single mpid we are looking at. This is useful
                                 for figuring out how many dummy features you need to add.
         '''
         mpids = set(doc['mpid'] for doc in self.catalog_docs)
-        num_species_per_mpid = [len(self.compositions_by_mpid[mpid]) for mpid in mpids]
-        self.max_num_species = max(num_species_per_mpid)
-
-
-    def fingerprint_docs(self, docs):
-        '''
-        Convert a list of documents into a list of numerical fingerprints.
-
-        Inputs:
-            docs    A list of dictionaries that should have the keys 'mpid' and 'coordination'.
-                    The value for 'mpid' should be in the form 'mpid-23' and the value
-                    for 'coordination' should be in the form 'Cu-Cu-Cu'.
-                    Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
-        Output:
-            fingerprints    A list of numpy.array objects. Each numpy array is a
-                            numerical representation of each document that you gave this
-                            method, as per the docstring of this class. Note that
-                            the array is actually a flattened, 1-dimensional object.
-        '''
-        fingerprints = [self.fingerprint_doc(doc) for doc in docs]
-        return fingerprints
+        num_species_per_mpid = [len(self.compositions_by_mpid_[mpid]) for mpid in mpids]
+        self.max_num_species_ = max(num_species_per_mpid)
 
 
 class InnerShellFingerprinter(Fingerprinter):
@@ -244,6 +272,24 @@ class InnerShellFingerprinter(Fingerprinter):
     Davie et al (Kriging atomic properties with a variable number of inputs, J
     Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
     '''
+    def transform(self, docs):
+        '''
+        Convert a list of documents into a numpy array of numerical fingerprints.
+
+        Inputs:
+            docs    A list of dictionaries that should have the keys 'mpid' and 'coordination'.
+                    The value for 'mpid' should be in the form 'mpid-23' and the value
+                    for 'coordination' should be in the form 'Cu-Cu-Cu'.
+                    Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
+        Returns:
+            fingerprints    A numpy.array object that is a numerical representation the
+                            documents that you gave this method, as per the docstring of
+                            this class.
+        '''
+        fingerprints = np.array([self.fingerprint_doc(doc) for doc in docs])
+        return fingerprints
+
+
     def fingerprint_doc(self, doc):
         '''
         Convert a document into a numerical fingerprint.
@@ -253,7 +299,7 @@ class InnerShellFingerprinter(Fingerprinter):
                     The value for 'mpid' should be in the form 'mpid-23' and the value
                     for 'coordination' should be in the form 'Cu-Cu-Cu'.
                     Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
-        Output:
+        Returns:
             fingerprint A numpy.array object that is a numerical representation the
                         document that you gave this method, as per the docstring of
                         this class. Note that the array is actually a flattened,
@@ -268,8 +314,8 @@ class InnerShellFingerprinter(Fingerprinter):
 
         # Add and sort the elemental information for each element present
         for element in set(binding_atoms):
-            energy = self.median_adsorption_energies[element]
-            element_data = self.mendeleev_data[element]
+            energy = self.median_adsorption_energies_[element]
+            element_data = self.mendeleev_data_[element]
             atomic_number = element_data.atomic_number
             electronegativity = element_data.electronegativity(scale='pauling')
             count = binding_atoms.count(element)
@@ -277,8 +323,8 @@ class InnerShellFingerprinter(Fingerprinter):
         fingerprint = sorted(fingerprint)
 
         # Fill in the dummy fingerprints
-        for _ in range(len(fingerprint), self.max_num_species):
-            fingerprint.append(self.dummy_fp)
+        for _ in range(len(fingerprint), self.max_num_species_):
+            fingerprint.append(self.dummy_fp_)
 
         return np.array(fingerprint).flatten()
 
@@ -300,6 +346,24 @@ class OuterShellFingerprinter(Fingerprinter):
     Davie et al (Kriging atomic properties with a variable number of inputs, J
     Chem Phys 2016). The out-of-bounds feature we choose is the atomic count.
     '''
+    def transform(self, docs):
+        '''
+        Convert a list of documents into a numpy array of numerical fingerprints.
+
+        Inputs:
+            docs    A list of dictionaries that should have the keys 'mpid' and 'coordination'.
+                    The value for 'mpid' should be in the form 'mpid-23' and the value
+                    for 'coordination' should be in the form 'Cu-Cu-Cu'.
+                    Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
+        Returns:
+            fingerprints    A numpy.array object that is a numerical representation the
+                            documents that you gave this method, as per the docstring of
+                            this class.
+        '''
+        fingerprints = np.array([self.fingerprint_doc(doc) for doc in docs])
+        return fingerprints
+
+
     def fingerprint_doc(self, doc):
         '''
         Convert a document into a numerical fingerprint.
@@ -309,7 +373,7 @@ class OuterShellFingerprinter(Fingerprinter):
                     The value for 'mpid' should be in the form 'mpid-23' and the value
                     for 'coordination' should be in the form 'Cu-Cu-Cu'.
                     Should probably come from the `gaspy.gasdb.get_catalog_docs` function.
-        Output:
+        Returns:
             fingerprint A numpy.array object that is a numerical representation the
                         document that you gave this method, as per the docstring of
                         this class. Note that the array is actually a flattened,
@@ -320,8 +384,8 @@ class OuterShellFingerprinter(Fingerprinter):
 
         # Add and sort the elemental information for each element present
         for element in set(second_shell_atoms):
-            energy = self.median_adsorption_energies[element]
-            element_data = self.mendeleev_data[element]
+            energy = self.median_adsorption_energies_[element]
+            element_data = self.mendeleev_data_[element]
             atomic_number = element_data.atomic_number
             electronegativity = element_data.electronegativity(scale='pauling')
             count = second_shell_atoms.count(element)
@@ -329,8 +393,8 @@ class OuterShellFingerprinter(Fingerprinter):
         fingerprint = sorted(fingerprint)
 
         # Fill in the dummy fingerprints
-        for _ in range(len(fingerprint), self.max_num_species):
-            fingerprint.append(self.dummy_fp)
+        for _ in range(len(fingerprint), self.max_num_species_):
+            fingerprint.append(self.dummy_fp_)
 
         return np.array(fingerprint).flatten()
 
@@ -339,7 +403,7 @@ class OuterShellFingerprinter(Fingerprinter):
     def _concatenate_second_shell(doc):
         '''
         This is a helper method to parse a neighborcoord string and
-        concatenate all of the neighbors of the binding atoms together.  Note
+        concatenate all of the neighbors of the binding atoms together. Note
         that the counting that we do here allows for redundant counting of
         atoms. In other words:  If an atom is bound to three different binding
         atoms, then it will show up in this method's output three times.
@@ -347,8 +411,8 @@ class OuterShellFingerprinter(Fingerprinter):
         Arg:
             doc     A dictionary with the 'neighborcoord' string, whose contents
                     should look like:
-                        ['Cu:',
-                         'Al:']
+                        ['Cu:Cu-Cu-Cu-Cu-Cu-Al',
+                         'Al:Cu-Cu-Cu-Cu-Cu-Cu']
         Returns:
             second_shell_atoms  An extended list of the coordinations of all
                                 binding atoms. Continiuing from the example
@@ -374,16 +438,63 @@ class StackedFingerprinter(object):
     def __init__(self, *fingerprinters):
         '''
         Args:
-            *fingerprinters All of the fingerprinter class objects
-                            that you want stacked together. This class
-                            assumes that every one of these objects
-                            has a `fingerprint_doc` method that accepts
-                            a dictionary and outputs a numpy array.
+            *fingerprinters A sequence of instances of the fingerprinter
+                            class objects that you want stacked together.
+                            We do not recommend fitting them before
+                            passing them to this stacker.
         '''
         self.fingerprinters = fingerprinters
 
 
-    def fingerprint_docs(self, docs):
+    def fit(self, X, y=None):
+        '''
+        Executes the `fit` methods of all the fingerprinters you passed
+        during instantiation.
+
+        Args:
+            X   A list of dictionaries that should be fetched using the
+                `gaspy.gasdb.get_adsorption_docs` function. You can
+                change the filter used to get the documents, but you
+                probably shouldn't remove any fingerprints unless you
+                know what you're doing.
+            y   Argument required to be able to fit within
+                the SKLearn framework. You should ignore this argument
+                and not pass anything to it.
+        Returns:
+            self
+        '''
+        for fingerprinter in self.fingerprinters:
+            _ = fingerprinter.fit(X)    # noqa: F841
+        return self
+
+
+    def fit_transform(self, X, y=None):
+        '''
+        This method behaves as a `fit_transform` method from SKLearn would:
+        given training data, it calculates and assigns the attributes needed
+        to run the `transform` method. It then returns the transformation
+        of the training data.
+
+        Args:
+            X   A list of dictionaries that should be fetched using the
+                `gaspy.gasdb.get_adsorption_docs` function. You can
+                change the filter used to get the documents, but you
+                probably shouldn't remove any fingerprints unless you
+                know what you're doing.
+            y   Argument required to be able to fit within
+                the SKLearn framework. You should ignore this argument
+                and not pass anything to it.
+        Returns:
+            features    A numpy.array object that is a numerical representation the
+                        documents that you gave this method, as per the docstring of
+                        this class.
+        '''
+        self.fit(X, y=y)
+        features = self.transform(X)
+        return features
+
+
+    def transform(self, docs):
         '''
         Convert a list of documents into a list of numerical fingerprints.
 
@@ -393,35 +504,14 @@ class StackedFingerprinter(object):
                     inherit the requirements of the fingerprinters that you are
                     stacking. Should probably come from the
                     `gaspy.gasdb.get_catalog_docs` function.
-        Output:
-            fingerprints    A list of numpy.array objects. Each numpy array is a
-                            numerical representation of each document that you gave this
-                            method, as per the docstrings of the fingerprinters you
-                            used to initialize this class. Note that the array is actually
-                            a flattened, 1-dimensional object.
-        '''
-        fingerprints = [self.fingerprint_doc(doc) for doc in docs]
-        return fingerprints
-
-
-    def fingerprint_doc(self, doc):
-        '''
-        Convert a dictionary/document into a numerical vector.
-
-        Inputs:
-            doc     A list of dictionaries that contain information you need for
-                    fingerprinting. The required contents of these dictionaries
-                    inherit the requirements of the fingerprinters that you are
-                    stacking. Should probably come from the
-                    `gaspy.gasdb.get_catalog_docs` function.
-        Output:
+        Returns:
             fingerprints    A list of numpy.array objects. Each numpy array is a
                             numerical representation of each document that you gave this
                             method, as per the docstrings of the fingerprinters you used
                             to initialize this class. Note that the array is actually
                             a flattened, 1-dimensional object.
         '''
-        tupled_fingerprint = tuple(fingerprinter.fingerprint_doc(doc)
+        tupled_fingerprint = tuple(fingerprinter.transform(docs)
                                    for fingerprinter in self.fingerprinters)
-        stacked_fingerprint = np.concatenate(tupled_fingerprint, axis=0)
+        stacked_fingerprint = np.concatenate(tupled_fingerprint, axis=1)
         return stacked_fingerprint
