@@ -15,7 +15,11 @@ from gaspy import gasdb
 from gaspy.utils import read_rc
 from gaspy_regress import fingerprinters
 from gaspy_regress.utils import save_pipeline_predictions
-
+from gaspy.gasdb import get_catalog_docs_with_predictions
+import datetime
+import tqdm
+from pymongo import UpdateOne
+from gaspy.gasdb import get_mongo_collection 
 
 def model_and_predict(adsorbate):
     '''
@@ -66,3 +70,47 @@ def model_and_predict(adsorbate):
     # Make and save predictions
     _ = save_pipeline_predictions(pipeline, adsorbate, model_name)  # noqa: F841
     model_and_predict(adsorbate)
+
+    
+def ORR_limiting_potential_prediction(model_name):
+    '''
+    Take predictions for O/OH/OOH on each catalog site and 
+    calculate the limiting potential for the 4e ORR,
+    adding it back to the catalog as predictions.orr_onset_potential_4e
+
+    Arg:
+        model_name  String for the model name from which to take
+                    the predictions for O/OH/OOH.
+    '''
+    
+    #Grab all of the catalog docs with predictions for O/OH/OOH
+    docs = get_catalog_docs_with_predictions(['O', 'OH', 'OOH'])
+    predictions = []
+    for doc in docs:
+        try:
+            E_OH = next(iter(doc['predictions']['adsorption_energy']['OH'].values()))[1]
+        except TypeError:
+            #Sometime E_OH is not defined, not clear why
+            E_OH=5
+        E_O = next(iter(doc['predictions']['adsorption_energy']['O'].values()))[1]
+        E_OOH = next(iter(doc['predictions']['adsorption_energy']['OOH'].values()))[1]
+        
+        #ORR limiting potential from Seoin Back, including free energy corrections
+        predictions.append(np.min([4.877-E_OOH, E_OOH-E_O-0.014, E_O-E_OH+0.28, E_OH-0.223]))
+
+    #Make a command for each doc to push the predictions
+    mongo_commands = []
+    time = datetime.datetime.utcnow()
+    print('Making Mongo commands...')
+    for doc, prediction in tqdm.tqdm(zip(docs, predictions), total=len(docs)):
+        mongo_id = doc['mongo_id']
+        energy_location = ('predictions.orr_onset_potential_4e.%s'
+                           % (model_name))
+        command = UpdateOne({'_id': mongo_id},
+                            {'$push': {energy_location: (time, prediction)},
+                             '$set': {'mtime': time}})
+        mongo_commands.append(command)
+    
+    #Write the ORR potential predictions
+    with get_mongo_collection('relaxed_bulk_catalog') as collection:
+        mongo_result = collection.bulk_write(mongo_commands, ordered=False)
