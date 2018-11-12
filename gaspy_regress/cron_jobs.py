@@ -92,11 +92,13 @@ def ORR_limiting_potential_prediction(model_name):
         except TypeError:
             #Sometime E_OH is not defined, not clear why
             E_OH=5
-        E_O = next(iter(doc['predictions']['adsorption_energy']['O'].values()))[1]
-        E_OOH = next(iter(doc['predictions']['adsorption_energy']['OOH'].values()))[1]
+        
+        G_O = next(iter(doc['predictions']['adsorption_energy']['O'].values()))[1]+0.057
+        G_OH = E_OH-0.223
+        G_OOH = next(iter(doc['predictions']['adsorption_energy']['OOH'].values()))[1]+0.043
         
         #ORR limiting potential from Seoin Back, including free energy corrections
-        predictions.append(np.min([4.877-E_OOH, E_OOH-E_O-0.014, E_O-E_OH+0.28, E_OH-0.223]))
+        predictions.append(np.min([4.92-G_OOH, G_OOH-G_O, G_O-G_OH, G_OH]))
 
     #Make a command for each doc to push the predictions
     mongo_commands = []
