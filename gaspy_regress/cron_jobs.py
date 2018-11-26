@@ -65,4 +65,3 @@ def model_and_predict(adsorbate):
 
     # Make and save predictions
     _ = save_pipeline_predictions(pipeline, adsorbate, model_name)  # noqa: F841
-    model_and_predict(adsorbate)
