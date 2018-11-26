@@ -16,7 +16,7 @@ with warnings.catch_warnings():
     import mendeleev
 from pymatgen.ext.matproj import MPRester
 from gaspy.utils import read_rc
-from gaspy.gasdb import get_catalog_docs
+from gaspy.gasdb import get_catalog_docs, get_mongo_collection
 
 CACHE_LOCATION = read_rc('gasdb_path')
 
@@ -159,11 +159,11 @@ class Fingerprinter(BaseEstimator, TransformerMixin):
 
         # If necessary, find the unknown compositions and save them to the cache
         if unknown_mpids:
+            atoms_db = get_mongo_collection('atoms')
             with MPRester(read_rc('matproj_api_key')) as rester:
                 for mpid in unknown_mpids:
-                    entry = rester.get_entry_by_material_id({'task_ids': mpid})
-                    composition = entry.as_dict()['composition']
-                    compositions_by_mpid[mpid] = list(composition.keys())
+                    compositions_by_mpid[mpid] = atoms_db.find({'fwname.calculation_type':'unit cell optimization','fwname.mpid':mpid})[0]['atoms']['chemical_symbols']
+
             with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'wb') as file_handle:
                 pickle.dump(compositions_by_mpid, file_handle)
 
