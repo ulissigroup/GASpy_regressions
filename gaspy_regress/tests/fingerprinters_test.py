@@ -126,7 +126,7 @@ class TestFingerprinter(object):
             for mpid in known_mpids:
                 entry = rester.get_entry_by_material_id({'task_ids': mpid})
                 expected_composition = list(entry.as_dict()['composition'].keys())
-                assert compositions_by_mpid[mpid] == expected_composition
+                assert set(compositions_by_mpid[mpid]) == set(expected_composition)
 
 
     def test__get_elements_in_scope(self, fingerprinting_fixture):
