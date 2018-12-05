@@ -23,11 +23,13 @@ if [ $jupyter = "jupyter" ]; then
     docker run -it --rm -w "/home/jovyan/GASpy" \
         -p 8888:8888 \
         -v $gaspy_mounting_config \
+        -v $HOME/.ssh:/home/.ssh \
         ulissigroup/gaspy_regressions:latest \
         jupyter
 else
     docker run -it --rm -w "/home/jovyan/GASpy" \
         -v $gaspy_mounting_config \
+        -v $HOME/.ssh:/home/.ssh \
         ulissigroup/gaspy_regressions:latest \
         /bin/bash
 fi
