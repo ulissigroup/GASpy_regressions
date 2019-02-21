@@ -133,17 +133,19 @@ class Fingerprinter(BaseEstimator, TransformerMixin):
     def _get_compositions_by_mpid(self):
         '''
         We use the Materials Project's python API to find the composition of
-        various materials given their MPIDs. This can take awhile though, so we also
-        cache the results and modify the cache as necessary.
+        various materials given their MPIDs. This can take awhile though, so we
+        also cache the results and modify the cache as necessary.
 
         Resulting attribute:
-            compositions_by_mpid_   A dictionary whose keys are MPIDs and whose values
-                                    are lists of strings for each element that is present
-                                    in the corresponding material. This object is cached
-                                    and therefore may have extra key:value pairings
-                                    that you may not need.
+            compositions_by_mpid_   A dictionary whose keys are MPIDs and whose
+                                    values are lists of strings for each
+                                    element that is present in the
+                                    corresponding material. This object is
+                                    cached and therefore may have extra
+                                    key:value pairings that you may not need.
         '''
-        # Find the current cache of compositions. If it's not there, then initialize it as an empty dict
+        # Find the current cache of compositions. If it's not there, then
+        # initialize it as an empty dict
         try:
             with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'rb') as file_handle:
                 compositions_by_mpid = pickle.load(file_handle)
@@ -152,17 +154,19 @@ class Fingerprinter(BaseEstimator, TransformerMixin):
 
         # Figure out which compositions we still need to figure out
         known_mpids = set(compositions_by_mpid.keys())
-        required_mpids = set(doc['mpid'] for doc in self.adsorption_docs) | \
-                         set(doc['mpid'] for doc in self.catalog_docs)
+        required_mpids = (set(doc['mpid'] for doc in self.adsorption_docs) |
+                          set(doc['mpid'] for doc in self.catalog_docs))
         unknown_mpids = required_mpids - known_mpids
 
-        # If necessary, find the unknown compositions and save them to the cache
+        # If necessary, find the unknown compositions and save them to the
+        # cache
         if unknown_mpids:
             with get_mongo_collection('atoms') as atoms_collection:
                 for mpid in unknown_mpids:
                     query = {'fwname.calculation_type': 'unit cell optimization',
                              'fwname.mpid': mpid}
-                    composition = atoms_collection.find(query)[0]['atoms']['chemical_symbols']
+                    docs = list(atoms_collection.find(query).limit(1))
+                    composition = docs[0]['atoms']['chemical_symbols']
                     compositions_by_mpid[mpid] = composition
 
             with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'wb') as file_handle:
