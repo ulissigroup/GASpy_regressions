@@ -235,10 +235,10 @@ def __create_4e_orr_onset_potential_push_commands(docs, all_predictions):
         # Calculate onset potential from dG (credit to Seoin Back)
         print('[%s] Making 4e onset potential predictions for using %s...'
               % (datetime.utcnow(), model_name))
-        onset_potentials = np.min(np.array(4.92 - G_OOH,
-                                           G_OOH - G_O,
-                                           G_O - G_OH,
-                                           G_OH),
+        onset_potentials = np.min(np.array([4.92 - G_OOH,
+                                            G_OOH - G_O,
+                                            G_O - G_OH,
+                                            G_OH]),
                                   axis=0)
 
         # Parse the onset potentials into Mongo `$push` commands
