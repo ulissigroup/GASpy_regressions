@@ -228,9 +228,9 @@ def __create_4e_orr_onset_potential_push_commands(docs, all_predictions):
     # Fetch all of the adsorption energy predictions and convert them to dG
     push_commands = defaultdict(dict)
     for model_name in models:
-        G_O = all_predictions[(model_name, 'O')] + 0.057
-        G_OH = all_predictions[(model_name, 'OH')] - 0.223
-        G_OOH = all_predictions[(model_name, 'OOH')] + 0.043
+        G_O = np.array(all_predictions[(model_name, 'O')]) + 0.057
+        G_OH = np.array(all_predictions[(model_name, 'OH')]) - 0.223
+        G_OOH = np.array(all_predictions[(model_name, 'OOH')]) + 0.043
 
         # Calculate onset potential from dG (credit to Seoin Back)
         print('[%s] Making 4e onset potential predictions for using %s...'
