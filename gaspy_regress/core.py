@@ -136,6 +136,8 @@ def save_predictions(models=None, adsorbates=None, processes=16):
     print('[%s] Writing predictions into catalog now...' % datetime.utcnow())
     with get_mongo_collection('catalog') as collection:
         mongo_result = collection.bulk_write(mongo_commands, ordered=False)
+    print('[%s] Updated %i predictiotns in the catalog'
+          % (datetime.utcnow(), len(mongo_commands)))
 
     return mongo_result
 
