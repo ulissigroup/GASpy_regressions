@@ -136,9 +136,6 @@ def save_predictions():
     adsorption_push_commands = __create_adsorption_energy_push_commands(mongo_ids, dE_predictions)
     orr_push_commands = __create_4e_orr_onset_potential_push_commands(mongo_ids, dE_predictions)
 
-    import pdb
-    pdb.set_trace()
-
     # We'll be using pymongo's `bulk_write`, which takes a list of commands.
     # We'll be making a list of `UpdateOne` commands.
     mongo_commands = []
