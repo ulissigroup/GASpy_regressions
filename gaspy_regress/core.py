@@ -19,16 +19,14 @@ from gaspy.gasdb import get_catalog_docs, get_adsorption_docs, get_mongo_collect
 from gaspy_regress import fingerprinters
 
 GASDB_LOCATION = read_rc('gasdb_path')
+PREDICTIONS_CACHE = GASDB_LOCATION + '/predictions.pkl'
 
 
-def fit_model0_adsorption_energies(adsorbates=None):
+def fit_model0_adsorption_energies():
     '''
     Create and save a modeling pipeline to predict adsortion energies.
 
-    Arg:
-        adsorbates  A list of strings indicating which adsorbate(s) to make
-                    pipelines for
-    Returns:
+    Saves:
         pipeline    An `sklearn.pipeline.Pipeline` object that is fit to our
                     data and can be used to make predictions on adsorption
                     energies.  The pipeline is automatically saved to our GASdb
@@ -38,8 +36,7 @@ def fit_model0_adsorption_energies(adsorbates=None):
     model_name = 'model0'
 
     # Python doesn't like mutable default argumets
-    if adsorbates is None:
-        adsorbates = ['CO', 'H', 'O', 'OH', 'OOH', 'N']
+    adsorbates = ['CO', 'H', 'O', 'OH', 'OOH', 'N']
 
     # Make a model for each adsorbate
     for adsorbate in adsorbates:
@@ -80,86 +77,23 @@ def fit_model0_adsorption_energies(adsorbates=None):
             pickle.dump(pipeline, file_handle)
 
 
-def save_predictions(models=None, adsorbates=None, processes=16):
+def cache_predictions(processes=32):
     '''
-    Wrapper to make a bunch of predictions, and then save them all at once. We
-    save them all at once so that we can hopefully write to Mongo all at once
-    instead of multiple times per day.
+    Wrapper to make and save our adsorption energy predictions in a pickle.
 
     Args:
-        models      A list of strings indicating which model(s) to make
-                    predictions for.
-        adsorbates  A list of strings indicating which adsorbate(s) to make
-                    predictions for
         processes   The number of threads/processes you want to be using
     Returns:
-        mongo_result    Mongo returns a `result` object after we write to it.
-                        This is that object.
-    '''
-    # Python doesn't like mutable default arguments
-    if models is None:
-        models = ['model0']
-    if adsorbates is None:
-        adsorbates = ['CO', 'H', 'N', 'O', 'OH', 'OOH']
-    # Onset potentials need these adsorbates
-    if 'O' not in adsorbates:
-        adsorbates.append('O')
-    if 'OH' not in adsorbates:
-        adsorbates.append('OH')
-    if 'OOH' not in adsorbates:
-        adsorbates.append('OOH')
-
-    # Get the adsorption energy predictions
-    docs = get_catalog_docs()
-    dE_predictions = _create_adsorption_energy_predictions(docs,
-                                                           models=models,
-                                                           adsorbates=adsorbates,
-                                                           processes=processes)
-
-    # Parse the predictions into `$push` commands
-    adsorption_push_commands = __create_adsorption_energy_push_commands(docs, dE_predictions)
-    orr_push_commands = __create_4e_orr_onset_potential_push_commands(docs, dE_predictions)
-
-    # We'll be using pymongo's `bulk_write`, which takes a list of commands.
-    # We'll be making a list of `UpdateOne` commands.
-    mongo_commands = []
-    for doc in docs:
-        mongo_id = doc['mongo_id']
-        push_commands = {**adsorption_push_commands[mongo_id],
-                         **orr_push_commands[mongo_id]}
-        command = UpdateOne({'_id': mongo_id},
-                            {'$push': push_commands,
-                             '$set': {'mtime': datetime.utcnow()}})
-        mongo_commands.append(command)
-
-    # Write the results
-    print('[%s] Writing predictions into catalog now...' % datetime.utcnow())
-    with get_mongo_collection('catalog') as collection:
-        mongo_result = collection.bulk_write(mongo_commands, ordered=False)
-    print('[%s] Updated %i predictiotns in the catalog'
-          % (datetime.utcnow(), len(mongo_commands)))
-
-    return mongo_result
-
-
-def _create_adsorption_energy_predictions(docs, models, adsorbates, processes=16):
-    '''
-    Uses whatever pipeline we currently have saved, and then applies it to our
-    catalog to predict adsorption energies.
-
-    Args:
-        docs        A list of dictionaries that can be fed to the modeling
-                    pipelines to make predictions
-        models      A list of strings indicating which model(s) to make
-                    predictions for.
-        adsorbates  A list of strings indicating which adsorbate(s) to make
-                    predictions for
-        processes   The number of threads/processes you want to be using
-    Returns:
+        mongo_ids       A list of ObjectIDs of the documents in our catalog.
+                        This corresponds to the elements in `all_predictions`.
         all_predictions A dictionary whose keys are tuples of the model name
                         and adsorbate (respectively) and whose values are the
                         adsorption energy predictions of each document
     '''
+    models = ['model0']
+    adsorbates = ['CO', 'H', 'N', 'O', 'OH', 'OOH']
+    docs = get_catalog_docs()
+
     # Make predictions for each pair of models/adsorbates
     all_predictions = {}
     for model_name in models:
@@ -177,17 +111,64 @@ def _create_adsorption_energy_predictions(docs, models, adsorbates, processes=16
                                           processes=processes, maxtasksperchild=100,
                                           chunksize=1000, n_calcs=len(docs))
             all_predictions[(model_name, adsorbate)] = predictions
-    return all_predictions
+
+    # Save and return our answers
+    mongo_ids = [doc['mongo_id'] for doc in docs]
+    with open(PREDICTIONS_CACHE, 'wb') as file_handle:
+        pickle.dump((mongo_ids, all_predictions), file_handle)
+    return mongo_ids, all_predictions
 
 
-def __create_adsorption_energy_push_commands(docs, all_predictions):
+def save_predictions():
+    '''
+    Wrapper to read our prediction cache, and then save them all at once. We
+    save them all at once so that we can hopefully write to Mongo all at once
+    instead of multiple times per day.
+
+    Returns:
+        mongo_result    Mongo returns a `result` object after we write to it.
+                        This is that object.
+    '''
+    with open(PREDICTIONS_CACHE, 'rb') as file_handle:
+        mongo_ids, dE_predictions = pickle.load(file_handle)
+
+    # Parse the predictions into `$push` commands
+    adsorption_push_commands = __create_adsorption_energy_push_commands(mongo_ids, dE_predictions)
+    orr_push_commands = __create_4e_orr_onset_potential_push_commands(mongo_ids, dE_predictions)
+
+    import pdb
+    pdb.set_trace()
+
+    # We'll be using pymongo's `bulk_write`, which takes a list of commands.
+    # We'll be making a list of `UpdateOne` commands.
+    mongo_commands = []
+    for mongo_id in mongo_ids:
+        push_commands = {**adsorption_push_commands[mongo_id],
+                         **orr_push_commands[mongo_id]}
+        command = UpdateOne({'_id': mongo_id},
+                            {'$push': push_commands,
+                             '$set': {'mtime': datetime.utcnow()}})
+        mongo_commands.append(command)
+
+    # Write the results
+    print('[%s] Writing predictions into catalog now...' % datetime.utcnow())
+    with get_mongo_collection('catalog') as collection:
+        mongo_result = collection.bulk_write(mongo_commands, ordered=False)
+    print('[%s] Updated %i predictiotns in the catalog'
+          % (datetime.utcnow(), len(mongo_commands)))
+
+    return mongo_result
+
+
+def __create_adsorption_energy_push_commands(mongo_ids, all_predictions):
     '''
     Takes the predictions from `_create_adsorption_energy_predictions` and
     turns them into `$push` commands that Mongo can use to update our catalog.
 
     Args:
-        docs            A list of dictionaries that can be fed to the modeling
-                        pipelines to make predictions
+        mongo_ids       A list of ObjectIDs of the documents in our catalog.
+                        This should correspond to the elements in
+                        `all_predictions`.
         all_predictions The output of the
                         `_create_adsorption_energy_predictions` function.
     Returns:
@@ -201,20 +182,20 @@ def __create_adsorption_energy_push_commands(docs, all_predictions):
     push_commands = defaultdict(dict)
     for (model_name, adsorbate), predictions in all_predictions.items():
         prediction_location = ('predictions.adsorption_energy.%s.%s' % (adsorbate, model_name))
-        for prediction, doc in zip(predictions, docs):
-            mongo_id = doc['mongo_id']
+        for mongo_id, prediction in zip(mongo_ids, predictions):
             push_commands[mongo_id][prediction_location] = (datetime.utcnow(), prediction)
     return push_commands
 
 
-def __create_4e_orr_onset_potential_push_commands(docs, all_predictions):
+def __create_4e_orr_onset_potential_push_commands(mongo_ids, all_predictions):
     '''
     Uses whatever pipeline we currently have saved, and then applies it to our
     catalog to predict ORR onset potentials.
 
     Args:
-        docs            A list of dictionaries that can be fed to the modeling
-                        pipelines to make predictions
+        mongo_ids       A list of ObjectIDs of the documents in our catalog.
+                        This should correspond to the elements in
+                        `all_predictions`.
         all_predictions The output of the
                         `_create_adsorption_energy_predictions` function.
     Returns:
@@ -245,7 +226,6 @@ def __create_4e_orr_onset_potential_push_commands(docs, all_predictions):
 
         # Parse the onset potentials into Mongo `$push` commands
         prediction_location = ('predictions.orr_onset_potential_4e.%s' % model_name)
-        for doc, potential in zip(docs, onset_potentials):
-            mongo_id = doc['mongo_id']
+        for mongo_id, potential in zip(mongo_ids, onset_potentials):
             push_commands[mongo_id][prediction_location] = (datetime.utcnow(), potential)
     return push_commands
