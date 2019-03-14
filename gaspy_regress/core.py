@@ -5,6 +5,7 @@ Various functions that are designed to be called from cron.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+import gc
 from collections import defaultdict
 from datetime import datetime
 import pickle
@@ -42,6 +43,9 @@ def fit_model0_adsorption_energies():
     for adsorbate in adsorbates:
         print('[%s] Making %s pipeline/regression for %s...'
               % (datetime.utcnow(), model_name, adsorbate))
+
+        # Delete any old objects to help prevent memory errors/segfaults
+        gc.collect()
 
         # Fit the transformers and models
         docs = get_adsorption_docs(adsorbate=adsorbate)
