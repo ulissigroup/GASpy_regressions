@@ -208,7 +208,7 @@ def save_predictions():
     for mongo_id in mongo_ids:
         push_commands = {**adsorption_push_commands[mongo_id],
                          **orr_push_commands[mongo_id],
-                         **orr_scaling_push_commands}
+                         **orr_scaling_push_commands[mongo_id]}
         command = UpdateOne({'_id': mongo_id},
                             {'$push': push_commands,
                              '$set': {'mtime': datetime.utcnow()}})
