@@ -3,10 +3,11 @@ This script contains helper functions that use Delta Learning Method to predict 
 The overall steps are below:
     1. Group OH and OOH adsorption energy based on adsorption site
     2. Perform a linear regression on all the data points and obtain slope and intercept.
-    3. Use TPOTRegressor to that predicts residual of each data point (residual deviated from the linear regression line), given fingerprints       (of the adsorption site).
-        The hybrid machine learning model is dE(OOH) = slope*dE(OH)+intercept +ML correction term
+    3. Use TPOTRegressor to that predicts residual of each data point (residual deviated from the linear regression line), 
+    given fingerprints (of the adsorption site).
+    The hybrid machine learning model pipeline is dE(OOH) = slope*dE(OH)+intercept +ML correction term
     4. Pull Kevin's model0 prediction on OH adsorption energy 
-    5. Use OH value & scalingML to predict OOH value
+    5. Use OH value & scalingML pipeline in step 3 to predict OOH value
 """
 
 import sys
