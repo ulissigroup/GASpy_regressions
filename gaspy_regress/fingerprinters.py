@@ -14,8 +14,9 @@ from sklearn.base import BaseEstimator, TransformerMixin
 with warnings.catch_warnings():
     warnings.filterwarnings('ignore', message='numpy.dtype size changed')
     import mendeleev
+from pymatgen.ext.matproj import MPRester
 from gaspy.utils import read_rc
-from gaspy.gasdb import get_catalog_docs, get_mongo_collection
+from gaspy.gasdb import get_catalog_docs
 
 CACHE_LOCATION = read_rc('gasdb_path')
 
@@ -158,20 +159,26 @@ class Fingerprinter(BaseEstimator, TransformerMixin):
                           set(doc['mpid'] for doc in self.catalog_docs))
         unknown_mpids = required_mpids - known_mpids
 
-        # If necessary, find the unknown compositions and save them to the
-        # cache
+        # If necessary, find the unknown compositions from The Materials Project
+        # and save them to the cache
         if unknown_mpids:
-            with get_mongo_collection('atoms') as atoms_collection:
-                for mpid in unknown_mpids:
-                    query = {'fwname.calculation_type': 'unit cell optimization',
-                             'fwname.mpid': mpid}
-                    docs = list(atoms_collection.find(query).limit(1))
-                    composition = docs[0]['atoms']['chemical_symbols']
-                    compositions_by_mpid[mpid] = composition
-
+            # Each MP document may contain several MPIDs. Here we get every
+            # single document whose list of associated MPIDs matches anything
+            # in our list of missing MPIDs.
+            with MPRester(read_rc('matproj_api_key')) as rester:
+                query = {'task_ids': {'$elemMatch': {'$in': list(unknown_mpids)}}}
+                properties = ['elements', 'task_ids']
+                mp_docs = rester.query(criteria=query,
+                                       properties=properties)
+            # Match the MP documents to our missing MPIDs.
+            for mpid in unknown_mpids:
+                for doc in mp_docs:
+                    if mpid in set(doc['task_ids']):
+                        compositions_by_mpid[mpid] = doc['elements']
+                        break
+            # Save the updated cache
             with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'wb') as file_handle:
                 pickle.dump(compositions_by_mpid, file_handle)
-
         self.compositions_by_mpid_ = compositions_by_mpid
 
 
