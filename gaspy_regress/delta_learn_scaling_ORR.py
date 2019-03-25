@@ -22,6 +22,23 @@ from sklearn import linear_model
 from tpot import TPOTRegressor
 from sklearn.preprocessing import StandardScaler
 import copy
+from gaspy.mongo import make_atoms_from_doc
+import numpy as np
+
+def validate_OOH_dissociation(doc):
+    """
+    helper function that filters out dissociated OOH (O-O bond >1.6A)
+    True: OOH not dissciated
+    False: OOH dissociated
+    """
+    if doc['adsorbate']=='OOH':
+        atoms = make_atoms_from_doc(doc)
+        if np.linalg.norm(atoms.positions[1]-atoms.positions[0])>1.8 or np.linalg.norm(atoms.positions[2]-atoms.positions[1])>1.4:
+            return False
+        else:
+            return True
+    else:
+        return True
 
 def process_adsorption_docs():
     """
@@ -42,24 +59,6 @@ def process_adsorption_docs():
 
     # Pull the documents and then modify them so that they'll work with the preprocessor
     raw_docs = gasdb.get_adsorption_docs(extra_projections=fingerprints, filters=filters)
-
-    from gaspy.mongo import make_atoms_from_doc
-    import numpy as np
-
-    def validate_OOH_dissociation(doc):
-        """
-        helper function that filters out dissociated OOH (O-O bond >1.6A)
-        True: OOH not dissciated
-        False: OOH dissociated
-        """
-        if doc['adsorbate']=='OOH':
-            atoms = make_atoms_from_doc(doc)
-            if np.linalg.norm(atoms.positions[1]-atoms.positions[0])>1.6:
-                return False
-            else:
-                return True
-        else:
-            return True
 
     filtered_adsorption_docs = [doc for doc in raw_docs if validate_OOH_dissociation(doc)]
 
