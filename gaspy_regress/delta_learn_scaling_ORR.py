@@ -27,7 +27,7 @@ import numpy as np
 
 def validate_OOH_dissociation(doc):
     """
-    helper function that filters out dissociated OOH (O-O bond >1.6A)
+    helper function that filters out dissociated OOH (O-O bond >1.8A, O-H bond >1.4A)
     True: OOH not dissciated
     False: OOH dissociated
     """
