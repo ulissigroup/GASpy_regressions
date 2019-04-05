@@ -9,6 +9,6 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 # flake8: noqa
 
-from .core import (fit_model0_adsorption_energies,
-                   cache_predictions,
-                   save_predictions)
+from .regressions import (fit_model0_adsorption_energies,
+                          cache_predictions,
+                          save_predictions)
