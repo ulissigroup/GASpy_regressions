@@ -228,5 +228,6 @@ def __create_4e_orr_onset_potential_push_commands(mongo_ids, all_predictions):
         # Parse the onset potentials into Mongo `$push` commands
         prediction_location = ('predictions.orr_onset_potential_4e.%s' % model_name)
         for mongo_id, potential in zip(mongo_ids, onset_potentials):
+            potential = float(potential)    # Mongo can't encode numpy floats
             push_commands[mongo_id][prediction_location] = (datetime.utcnow(), potential)
     return push_commands
