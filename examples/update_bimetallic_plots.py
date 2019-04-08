@@ -21,8 +21,8 @@ create_gridplot(adsorbate, targets, filename)
 
 # NH3 decomposition
 adsorbate = 'N'
-target = -0.91 * 2      # At 1% ammonia concentration
-# target = -0.58 * 2        # At 50% ammonia concentration
+target = -0.91 / 2      # At 1% ammonia concentration
+# target = -0.58 / 2        # At 50% ammonia concentration
 bandwidth = 0.2
 targets = (target-bandwidth, target+bandwidth)
 filename = 'NH3_decomp/N bimetallic map'
