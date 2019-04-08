@@ -207,7 +207,8 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
                        showgrid=False)
 
     # Format the plot itself
-    layout = go.Layout(titlefont=font,
+    layout = go.Layout(title=filename.split('/')[-1],
+                       titlefont=font,
                        xaxis=axes_labels,
                        yaxis=axes_labels,
                        showlegend=False,
