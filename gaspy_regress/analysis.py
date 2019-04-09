@@ -43,8 +43,8 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
                             'mpid', 'miller'}
 
     # Get and preprocess all the documents we have now
-    extra_projections = {'atoms': '$atoms', 'date':
-                         '$calculation_dates.slab+adsorbate'}
+    extra_projections = {'atoms': '$atoms',
+                         'date': '$calculation_dates.slab+adsorbate'}
     all_docs = get_adsorption_docs(adsorbate, extra_projections)
     with open(read_rc('gasdb_path') + 'mp_comp_data.pkl', 'rb') as file_handle:
         composition_by_mpid = pickle.load(file_handle)
@@ -94,13 +94,11 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
         # of lines
         ratios = [doc['ratio'] for doc in docs]
         unique_ratios = sorted(list(set(ratios)))
-        Y_by_ratio = []
         shuffle_counter = 0
         for i, ratio in enumerate(unique_ratios):
             ratio_count = ratios.count(ratio)
             ys = Y[shuffle_counter:shuffle_counter+ratio_count]
             random.shuffle(ys)
-            Y_by_ratio.append(ys)
             shuffle_counter += ratio_count
 
         # Concatenate the appropriately shuffled uniform distribution with
@@ -149,11 +147,23 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
                   (high_energy_normalized, high_color),
                   (1., high_color)]
 
+    # Sort the elements according to how many good calculations we have
+    n_calcs_by_element = defaultdict(int)
+    for element_i in all_elements:
+        for element_j in all_elements:
+            docs = [doc for doc in docs_by_comp[element_i, element_j]
+                    if low_energy <= doc['energy'] <= high_energy]
+            n_calcs_by_element[element_i] += len(docs)
+    elements_sorted = [element for element, count in
+                       sorted(n_calcs_by_element.items(),
+                              key=lambda kv: kv[1],
+                              reverse=True)]
+
     # Figure out the spacings between each square in the grid
     traces = []
-    for i, element_i in enumerate(all_elements):
+    for i, element_i in enumerate(elements_sorted):
         x_offset = (i+1) * max_width
-        for j, element_j in enumerate(all_elements):
+        for j, element_j in enumerate(elements_sorted):
             y_offset = (j+1) * max_width
 
             # If we have an empty square, move on
@@ -200,7 +210,7 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
                        tickvals=np.linspace(max_width,
                                             len(all_elements)*max_width,
                                             len(all_elements)),
-                       ticktext=[element for element in all_elements],
+                       ticktext=[element for element in elements_sorted],
                        tick0=max_width/2,
                        dtick=max_width,
                        tickfont=dict(size=axis_font_size),
