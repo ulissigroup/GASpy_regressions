@@ -59,9 +59,9 @@ def fit_model0_adsorption_energies():
                                            ('scaler', scaler),
                                            ('pca', pca)])
         features = preprocessing_pipeline.fit_transform(docs)
-        tpot = TPOTRegressor(generations=1,
-                             population_size=16,
-                             offspring_size=16,
+        tpot = TPOTRegressor(generations=2,
+                             population_size=32,
+                             offspring_size=32,
                              verbosity=2,
                              scoring='neg_median_absolute_error',
                              n_jobs=16)
