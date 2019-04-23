@@ -5,7 +5,6 @@ Various functions that are designed to be called from cron.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
-import gc
 from collections import defaultdict
 from datetime import datetime
 import pickle
@@ -23,10 +22,13 @@ GASDB_LOCATION = read_rc('gasdb_path')
 PREDICTIONS_CACHE = GASDB_LOCATION + '/predictions.pkl'
 
 
-def fit_model0_adsorption_energies():
+def fit_model0_adsorption_energies(adsorbate):
     '''
     Create and save a modeling pipeline to predict adsortion energies.
 
+    Arg:
+        adsorbate   String indicating which adsorbate you want to fit the model
+                    for
     Saves:
         pipeline    An `sklearn.pipeline.Pipeline` object that is fit to our
                     data and can be used to make predictions on adsorption
@@ -36,49 +38,41 @@ def fit_model0_adsorption_energies():
     '''
     model_name = 'model0'
 
-    # Python doesn't like mutable default argumets
-    adsorbates = ['CO', 'H', 'O', 'OH', 'OOH', 'N']
+    print('[%s] Making %s pipeline/regression for %s...'
+          % (datetime.utcnow(), model_name, adsorbate))
 
-    # Make a model for each adsorbate
-    for adsorbate in adsorbates:
-        print('[%s] Making %s pipeline/regression for %s...'
-              % (datetime.utcnow(), model_name, adsorbate))
+    # Fit the transformers and models
+    docs = get_adsorption_docs(adsorbate=adsorbate)
+    energies_dft = np.array([doc['energy'] for doc in docs])
+    inner_fingerprinter = fingerprinters.InnerShellFingerprinter()
+    outer_fingerprinter = fingerprinters.OuterShellFingerprinter()
+    fingerprinter = fingerprinters.StackedFingerprinter(inner_fingerprinter, outer_fingerprinter)
+    scaler = StandardScaler()
+    pca = PCA()
+    preprocessing_pipeline = Pipeline([('fingerprinter', fingerprinter),
+                                       ('scaler', scaler),
+                                       ('pca', pca)])
+    features = preprocessing_pipeline.fit_transform(docs)
+    tpot = TPOTRegressor(generations=2,
+                         population_size=32,
+                         offspring_size=32,
+                         verbosity=2,
+                         scoring='neg_median_absolute_error',
+                         n_jobs=16)
+    tpot.fit(features, energies_dft)
 
-        # Delete any old objects to help prevent memory errors/segfaults
-        gc.collect()
+    # Make the pipeline
+    steps = [('fingerprinter', fingerprinter),
+             ('scaler', scaler),
+             ('pca', pca)]
+    for step in tpot.fitted_pipeline_.steps:
+        steps.append(step)
+    pipeline = Pipeline(steps)
 
-        # Fit the transformers and models
-        docs = get_adsorption_docs(adsorbate=adsorbate)
-        energies_dft = np.array([doc['energy'] for doc in docs])
-        inner_fingerprinter = fingerprinters.InnerShellFingerprinter()
-        outer_fingerprinter = fingerprinters.OuterShellFingerprinter()
-        fingerprinter = fingerprinters.StackedFingerprinter(inner_fingerprinter, outer_fingerprinter)
-        scaler = StandardScaler()
-        pca = PCA()
-        preprocessing_pipeline = Pipeline([('fingerprinter', fingerprinter),
-                                           ('scaler', scaler),
-                                           ('pca', pca)])
-        features = preprocessing_pipeline.fit_transform(docs)
-        tpot = TPOTRegressor(generations=2,
-                             population_size=32,
-                             offspring_size=32,
-                             verbosity=2,
-                             scoring='neg_median_absolute_error',
-                             n_jobs=16)
-        tpot.fit(features, energies_dft)
-
-        # Make the pipeline
-        steps = [('fingerprinter', fingerprinter),
-                 ('scaler', scaler),
-                 ('pca', pca)]
-        for step in tpot.fitted_pipeline_.steps:
-            steps.append(step)
-        pipeline = Pipeline(steps)
-
-        # Save the pipeline
-        file_name = GASDB_LOCATION + '/pipeline_%s_%s.pkl' % (adsorbate, model_name)
-        with open(file_name, 'wb') as file_handle:
-            pickle.dump(pipeline, file_handle)
+    # Save the pipeline
+    file_name = GASDB_LOCATION + '/pipeline_%s_%s.pkl' % (adsorbate, model_name)
+    with open(file_name, 'wb') as file_handle:
+        pickle.dump(pipeline, file_handle)
 
 
 def cache_predictions(processes=32):

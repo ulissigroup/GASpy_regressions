@@ -4,9 +4,9 @@
 #SBATCH --constraint=knl
 #SBATCH --nodes=1
 #SBATCH --exclusive
-#SBATCH --time=04:00:00
+#SBATCH --time=24:00:00
 #SBATCH --account=m2755
-#SBATCH --qos=low
+#SBATCH --qos=premium
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
 #SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/jovyan/GASpy
 #SBATCH --job-name=predict
