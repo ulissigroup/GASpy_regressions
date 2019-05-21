@@ -6,6 +6,7 @@ __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
 from collections import defaultdict
+from atomicwrites import atomic_write
 from datetime import datetime
 import pickle
 import numpy as np
@@ -112,8 +113,8 @@ def cache_predictions(processes=32):
 
     # Save and return our answers
     mongo_ids = [doc['mongo_id'] for doc in docs]
-    with open(PREDICTIONS_CACHE, 'wb') as file_handle:
-        pickle.dump((mongo_ids, all_predictions), file_handle)
+    with atomic_write(PREDICTIONS_CACHE, mode='wb', overwrite=True) as file_handle:
+        file_handle.write(pickle.dumps((mongo_ids, all_predictions), protocol=pickle.HIGHEST_PROTOCOL))
     return mongo_ids, all_predictions
 
 
