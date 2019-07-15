@@ -39,7 +39,7 @@ create_gridplot(adsorbate, targets, filename)
 
 # ORR (OH)
 adsorbate = 'OH'
-target = 1.23
+target = 0.923 
 bandwidth = 0.2
 targets = (target-bandwidth, target+bandwidth)
 filename = 'ORR/OH bimetallic map'
