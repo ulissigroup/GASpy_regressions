@@ -179,7 +179,8 @@ def __create_adsorption_energy_push_commands(mongo_ids, all_predictions):
     for (model_name, adsorbate), predictions in all_predictions.items():
         prediction_location = ('predictions.adsorption_energy.%s.%s' % (adsorbate, model_name))
         for mongo_id, prediction in zip(mongo_ids, predictions):
-            push_commands[mongo_id][prediction_location] = (datetime.utcnow(), prediction)
+            prediction_ = float(prediction)  # Mongo can't encode numpy floats
+            push_commands[mongo_id][prediction_location] = (datetime.utcnow(), prediction_)
     return push_commands
 
 
