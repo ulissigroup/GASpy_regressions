@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --time=06:00:00
 #SBATCH --account=m2755
-#SBATCH --qos=premium
+#SBATCH --qos=regular
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
 #SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/jovyan/GASpy
 #SBATCH --job-name=push
