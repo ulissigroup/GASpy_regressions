@@ -14,8 +14,6 @@
 #SBATCH --output=regressions.log
 #SBATCH --error=regressions.log
 #SBATCH --open-mode=append
-#SBATCH --mail-user=ktran@andrew.cmu.edu
-#SBATCH --mail-type=ALL
 
 shifter \
     --image=ulissigroup/gaspy_regressions:latest \
