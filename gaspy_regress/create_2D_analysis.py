@@ -20,7 +20,6 @@ from gaspy.utils import read_rc
 from gaspy import gasdb
 from gaspy.mongo import make_atoms_from_doc
 # from gaspy_regress import awscache
-plotly.plotly.sign_in(**read_rc('plotly_login_info'))
 
 def plot_2D_plot(adsorbate1, adsorbate2, adsorbate1_correction, adsorbate2_correction):
     """
@@ -115,7 +114,8 @@ def plot_2D_plot(adsorbate1, adsorbate2, adsorbate1_correction, adsorbate2_corre
         print('you only added correction to 1 of the adsorbate energies. please keep the energies consistent')
 
     print('Your figure location is in Plotly 2D_plots/{}_{}_bySurface'.format(adsorbate1, adsorbate2))
-    plotly.iplot(fig, filename='2D_plots/{}_{}_bySurface'.format(adsorbate1, adsorbate2))
+    plotly.sign_in(**read_rc('plotly_login_info'))
+    plotly.plot(fig, filename='2D_plots/{}_{}_bySurface'.format(adsorbate1, adsorbate2))
 
 
 def _make_df_from_docs(adsorbate, columns_name):
@@ -145,8 +145,8 @@ def _make_df_from_docs(adsorbate, columns_name):
 #         else:
 #             with gasdb.get_mongo_collection(collection_tag='catalog') as collection:
 #                 mongo_doc = list(collection.find({'_id':doc['mongo_id']}))
-#         doc['atoms'] = mongo_doc['atoms']
-#         doc['results'] = mong_doc['results']
+#         doc['atoms'] = mongo_doc[0]['atoms']
+#         doc['results'] = mongo_doc[0]['results']
 #     awscache.cache_docs_to_images(adsorbate_docs, 4)
 
     # take the docs and extract information (mpid, miller, top,
