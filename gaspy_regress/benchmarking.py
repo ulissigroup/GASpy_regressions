@@ -1,6 +1,6 @@
 '''
 This module is meant to be used to assess regression models for their
-fitness-for-use in our active optimization workflows.
+fitness-for-use in our active discovery workflows.
 '''
 
 __author__ = 'Kevin Tran'
@@ -31,9 +31,9 @@ with warnings.catch_warnings():
     from tqdm.autonotebook import tqdm
 
 
-class ActiveOptimizer():
+class ActiveDiscoverer:
     '''
-    This is a parent class for simulating active optimization routines. The
+    This is a parent class for simulating active discovery routines. The
     child classes are meant to be used to judge the efficacy of training
     ando/or acquisition routines. It does so by "simulating" what the routine
     would have done given a particular sampling space.
@@ -63,7 +63,7 @@ class ActiveOptimizer():
     def __init__(self, optimal_value, training_set, sampling_space,
                  init_train=True, batch_size=200):
         '''
-        Perform the initial training for the active optimizer, and then
+        Perform the initial training for the active discoverer, and then
         initialize all of the other attributes.
 
         Args:
@@ -71,7 +71,7 @@ class ActiveOptimizer():
                             whatever it is you're optimizing. Should be used in
                             the `update_regret` method.
             training_set    A sequence that can be used to train/initialize the
-                            surrogate model of the active optimizer.
+                            surrogate model of the active discoverer.
             sampling_space  A sequence containing the rest of the possible
                             sampling space.
             batch_size      An integer indicating how many elements in the
@@ -81,11 +81,11 @@ class ActiveOptimizer():
                             You should keep it `True` unless you're doing a
                             warm start (manually).
         '''
-        # Attributes we use to judge the optimization
+        # Attributes we use to judge the discovery
         self.regret_history = [0.]
         self.residuals = []
 
-        # Attributes we need to hallucinate the optimization
+        # Attributes we need to hallucinate the discovery
         self.optimal_value = optimal_value
         self.next_batch_number = 0
         self.training_set = []
@@ -101,13 +101,13 @@ class ActiveOptimizer():
         self.__previous_regret_history_len = len(self.regret_history)
         self.__previous_residuals_len = len(self.residuals)
 
-    def simulate_optimization(self, starting_batch_number=0):
+    def simulate_discovery(self, starting_batch_number=0):
         '''
-        Perform the optimization simulation until all of the sampling space has
+        Perform the discovery simulation until all of the sampling space has
         been consumed.
         '''
         n_batches = math.ceil(len(self.sampling_space) / self.batch_size)
-        for i in tqdm(range(0, n_batches), desc='Hallucinating optimization...'):
+        for i in tqdm(range(0, n_batches), desc='Hallucinating discovery...'):
             self._hallucinate_next_batch()
 
     def _hallucinate_next_batch(self):
@@ -115,7 +115,7 @@ class ActiveOptimizer():
         Choose the next batch of data to get, add them to the `samples`
         attribute, and then re-train the surrogate model with the new samples.
         '''
-        # Perform one iteration of active optimization
+        # Perform one iteration of active discovery
         self._choose_next_batch()
         self._train()
         self._update_regret()
@@ -135,7 +135,7 @@ class ActiveOptimizer():
             self.__previous_sampling_space_len = len(self.sampling_space)
         except AssertionError as error:
             message = ('\nWhen creating the `_choose_next_batch` method for '
-                       'a child-class of `ActiveOptimizer`, you need to '
+                       'a child-class of `ActiveDiscoverer`, you need to '
                        'remove the chosen batch from the `sampling_space` '
                        'attribute.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -146,7 +146,7 @@ class ActiveOptimizer():
             self.__previous_training_set_len = len(self.training_set)
         except AssertionError as error:
             message = ('\nWhen creating the `_train` method for a '
-                       'child-class of `ActiveOptimizer`, you need to extend '
+                       'child-class of `ActiveDiscoverer`, you need to extend '
                        'the `training_set` attribute with the new training '
                        'batch.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -157,7 +157,7 @@ class ActiveOptimizer():
             self.__previous_residuals_len = len(self.residuals)
         except AssertionError as error:
             message = ('\nWhen creating the `_train` method for a '
-                       'child-class of `ActiveOptimizer`, you need to extend '
+                       'child-class of `ActiveDiscoverer`, you need to extend '
                        'the `residuals` attribute with the model\'s residuals '
                        'of the new batch (before retraining).')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -168,7 +168,7 @@ class ActiveOptimizer():
             self.__previous_regret_history_len = len(self.regret_history)
         except AssertionError as error:
             message = ('\nWhen creating the `_update_regret` method for a '
-                       'child-class of `ActiveOptimizer`, you need to append '
+                       'child-class of `ActiveDiscoverer`, you need to append '
                        'the `regret_history` attribute with the cumulative '
                        'regret given the new batch.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -176,7 +176,7 @@ class ActiveOptimizer():
     def plot_performance(self, n_violins=20):
         '''
         Light wrapper for plotting the regret an residuals over the course of
-        the optimization.
+        the discovery.
 
         Arg:
             n_violins   The number of violins you want plotted in the residuals
@@ -192,7 +192,7 @@ class ActiveOptimizer():
 
     def plot_regret(self):
         '''
-        Plot the regret vs. optimization batch
+        Plot the regret vs. discovery batch
 
         Returns:
             fig     The matplotlib figure object for the regret plot
@@ -203,7 +203,7 @@ class ActiveOptimizer():
         ax = sns.scatterplot(sampling_sizes, self.regret_history)
 
         # Format
-        _ = ax.set_xlabel('Number of optimization queries')  # noqa: F841
+        _ = ax.set_xlabel('Number of discovery queries')  # noqa: F841
         _ = ax.set_ylabel('Cumulative regret [eV]')  # noqa: F841
         _ = fig.set_size_inches(15, 5)  # noqa: F841
         return fig
@@ -235,15 +235,15 @@ class ActiveOptimizer():
         return fig
 
 
-class AdsorptionOptimizer(ActiveOptimizer):
+class AdsorptionDiscoverer(ActiveDiscoverer):
     '''
-    Here we extend the `ActiveOptimizer` class while making the following
+    Here we extend the `ActiveDiscoverer` class while making the following
     assumptions:  1) we are trying to optimize the adsorption energy and 2) our
     inputs are a list of dictionaries with the 'energy' key.
     '''
     def _update_regret(self):
         '''
-        Calculates the cumulative regret of the optimization thus far. Assumes
+        Calculates the cumulative regret of the discovery thus far. Assumes
         that your sampling space is a list of dictionaries, and that the key
         you want to optimize is 'energy'.
         '''
@@ -289,10 +289,10 @@ class AdsorptionOptimizer(ActiveOptimizer):
         return fig
 
 
-class RandomAdsorptionOptimizer(AdsorptionOptimizer):
+class RandomAdsorptionDiscoverer(AdsorptionDiscoverer):
     '''
-    This optimizer simply chooses new samples randomly. This is intended to be
-    used as a baseline for active optimization.
+    This discoverer simply chooses new samples randomly. This is intended to be
+    used as a baseline for active discovery.
     '''
     def _train(self):
         '''
@@ -335,9 +335,53 @@ class RandomAdsorptionOptimizer(AdsorptionOptimizer):
         self.next_batch_number += 1
 
 
-class TPOTGaussianAdsorptionOptimizer(AdsorptionOptimizer):
+class OmniscientAdsorptionDiscoverer(AdsorptionDiscoverer):
     '''
-    This optimizer uses a Gaussian selection method with a TPOT model to select
+    This discoverer has perfect knowledge of all data points and chooses the
+    best ones perfectly. No method can beat this, and as such it provides a
+    ceiling of performance.
+    '''
+    def _train(self):
+        '''
+        There's no real training here. We just do the bare minimum:  make up
+        some residuals and extend the training set.
+        '''
+        try:
+            # The model is omnipotent, so the residuals will be zero.
+            residuals = [0.] * len(self.training_batch)
+            self.residuals.extend(residuals)
+            self.training_set.extend(self.training_batch)
+
+        # If this is the first batch, then don't bother recording residuals
+        except TypeError:
+            pass
+
+    def _choose_next_batch(self):
+        '''
+        This method will choose the portion of the sampling space whose
+        energies are nearest to the target assign it to the `training_batch`
+        attribute. It will also remove anything we chose from the
+        `self.sampling_space` attribute.
+        '''
+        self.sampling_space.sort(key=lambda doc: abs(doc['energy'] - self.optimal_value),
+                                 reverse=True)
+        samples = []
+
+        # Simultaneously choose `self.batch_size` samples while removing them
+        # from the sampling space
+        for _ in range(self.batch_size):
+            try:
+                sample = self.sampling_space.pop()
+                samples.append(sample)
+            except IndexError:
+                break
+        self.training_batch = samples
+        self.next_batch_number += 1
+
+
+class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
+    '''
+    This discoverer uses a Gaussian selection method with a TPOT model to select
     new sampling points.
 
     ...sorry for the awful code. This is a hack-job and I know it.
@@ -411,7 +455,7 @@ class TPOTGaussianAdsorptionOptimizer(AdsorptionOptimizer):
         '''
         # Cache the current point for (manual) warm-starts, because there's a
         # solid chance that TPOT might cause a segmentation fault.
-        cache_name = 'caches/%.3i_optimization_cache.pkl' % self.next_batch_number
+        cache_name = 'caches/%.3i_discovery_cache.pkl' % self.next_batch_number
         with open(cache_name, 'wb') as file_handle:
             cache = {'training_set': self.training_set,
                      'sampling_space': self.sampling_space,
