@@ -18,6 +18,7 @@ import numpy as np
 from scipy.stats import norm
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -281,7 +282,7 @@ class AdsorptionDiscoverer(ActiveDiscoverer):
                               kind='hex', bins='log')
         ax = jgrid.ax_joint
         _ = ax.set_xlabel('DFT-calculated adsorption energy [eV]')  # noqa: F841
-        _ = ax.set_ylabel('TPOT-predicted adsorption energy [eV]')  # noqa: F841
+        _ = ax.set_ylabel('ML-predicted adsorption energy [eV]')  # noqa: F841
         _ = fig.set_size_inches(10, 10)  # noqa: F841
 
         # Add the parity line
@@ -555,3 +556,92 @@ def weighted_shuffle(sequence, weights):
                 break
 
     return shuffled_list.tolist()
+
+
+def benchmark_adsorption_regret(discoverers):
+    '''
+    This function will take the regret curves of trained `AdsorptionDiscoverer`
+    instances and the compare them to the floor and ceilings of performance for
+    you.
+
+    Arg:
+        discoverers     A dictionary whose keys are the string names that you
+                        want to label each discoverer with and whose values are
+                        the trained instances of an `AdsorptionDiscoverer`
+                        where the `simulate_discovery` methods for each are
+                        already executed.
+    Returns:
+        regret_fig  The matplotlib figure object for the regret plot
+        axes        A dictionary whose keys correspond to the names of the
+                    discovery classes and whose values are the matplotlib axis
+                    objects.
+    '''
+    # Initialize
+    regret_fig = plt.figure()
+    axes = {}
+
+    # Fetch the data used by the first discoverer to "train" the floor/ceiling
+    # models---i.e., get the baseline regret histories.
+    example_discoverer_name = list(discoverers.keys())[0]
+    example_discoverer = list(discoverers.values())[0]
+    optimal_value = example_discoverer.optimal_value
+    sampling_size = example_discoverer.batch_size * len(example_discoverer.regret_history)
+    training_docs = deepcopy(example_discoverer.training_set[:sampling_size])
+    sampling_docs = deepcopy(example_discoverer.training_set[-sampling_size:])
+
+    # Plot the worst-case scenario
+    random_discoverer = RandomAdsorptionDiscoverer(optimal_value,
+                                                   training_docs,
+                                                   sampling_docs)
+    random_discoverer.simulate_discovery()
+    sampling_sizes = [i*random_discoverer.batch_size
+                      for i, _ in enumerate(random_discoverer.regret_history)]
+    random_label = 'random selection (worst case)'
+    axes[random_label] = plt.plot(sampling_sizes,
+                                  random_discoverer.regret_history,
+                                  '--r',
+                                  label=random_label)
+
+    # Plot the regret histories
+    for name, discoverer in discoverers.items():
+        sampling_sizes = [i*discoverer.batch_size
+                          for i, _ in enumerate(discoverer.regret_history)]
+        ax = sns.scatterplot(sampling_sizes, discoverer.regret_history, label=name)
+        axes[name] = ax
+
+    # Plot the best-case scenario
+    omniscient_discoverer = OmniscientAdsorptionDiscoverer(optimal_value,
+                                                           training_docs,
+                                                           sampling_docs)
+    omniscient_discoverer.simulate_discovery()
+    omniscient_label = 'omniscient selection (ideal)'
+    sampling_sizes = [i*omniscient_discoverer.batch_size
+                      for i, _ in enumerate(omniscient_discoverer.regret_history)]
+    axes[omniscient_label] = plt.plot(sampling_sizes,
+                                      omniscient_discoverer.regret_history,
+                                      '--b',
+                                      label=omniscient_label)
+
+    # Sort the legend correctly
+    legend_info = {label: handle for handle, label in zip(*ax.get_legend_handles_labels())}
+    labels = [random_label]
+    labels.extend(list(discoverers.keys()))
+    labels.append(omniscient_label)
+    handles = [legend_info[label] for label in labels]
+    ax.legend(handles, labels)
+
+    # Formatting
+    example_ax = axes[example_discoverer_name]
+    # Labels axes
+    _ = example_ax.set_xlabel('Number of discovery queries')  # noqa: F841
+    _ = example_ax.set_ylabel('Cumulative regret [eV]')  # noqa: F841
+    # Add commas to axes ticks
+    formatter = ticker.FuncFormatter(lambda x, p: format(int(x), ','))
+    _ = example_ax.get_xaxis().set_major_formatter(formatter)
+    _ = example_ax.get_yaxis().set_major_formatter(formatter)
+    # Set bounds/limits
+    _ = example_ax.set_xlim([0, sampling_sizes[-1]])  # noqa: F841
+    _ = example_ax.set_ylim([0, random_discoverer.regret_history[-1]])  # noqa: F841
+    # Set figure size
+    _ = regret_fig.set_size_inches(15, 5)  # noqa: F841
+    return regret_fig
