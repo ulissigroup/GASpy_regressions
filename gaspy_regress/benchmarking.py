@@ -6,6 +6,7 @@ fitness-for-use in our active discovery workflows.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+
 import gc
 import sys
 import math
@@ -16,6 +17,7 @@ import pickle
 from bisect import bisect_right
 import numpy as np
 from scipy.stats import norm
+import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib import ticker
@@ -23,6 +25,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from tpot import TPOTRegressor
+import torch
+import gpytorch
 from gaspy_regress import fingerprinters
 
 # The tqdm autonotebook is still experimental, and it warns us. We don't care,
@@ -30,6 +34,10 @@ from gaspy_regress import fingerprinters
 with warnings.catch_warnings():
     warnings.simplefilter('ignore')
     from tqdm.autonotebook import tqdm
+
+
+# Used to put commas into figures' axes' labels
+FORMATTER = ticker.FuncFormatter(lambda x, p: format(int(x), ','))
 
 
 class ActiveDiscoverer:
@@ -174,20 +182,45 @@ class ActiveDiscoverer:
                        'regret given the new batch.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
 
-    def plot_performance(self, n_violins=20):
+    def _pop_next_batch(self):
         '''
-        Light wrapper for plotting the regret an residuals over the course of
+        Optional helper function that you can use to choose the next batch from
+        `self.sampling_space`, remove it from the attribute, place the new
+        batch onto the `self.training_batch` attribute, increment the
+        `self.next_batch_number`.
+
+        This method will only work if you have already sorted the
+        `self.sampling_space` such that the highest priority samples are
+        earlier in the index.
+        '''
+        samples = []
+        for _ in range(self.batch_size):
+            try:
+                sample = self.sampling_space.pop(0)
+                samples.append(sample)
+            except IndexError:
+                break
+        self.training_batch = samples
+        self.next_batch_number += 1
+
+    def plot_performance(self, window=20, metric='mean'):
+        '''
+        Light wrapper for plotting the regret and residuals over the course of
         the discovery.
 
         Arg:
-            n_violins   The number of violins you want plotted in the residuals
-                        figure
+            window  How many residuals to average at each point in the learning
+                    curve
+            metric  String indicating which metric you want to plot in the
+                    learning curve.  Corresponds exactly to the methods of the
+                    `pandas.DataFrame.rolling` class, e.g., 'mean', 'median',
+                    'min', 'max', 'std', 'sum', etc.
         Returns:
             regret_fig  The matplotlib figure object for the regret plot
             resid_fig   The matplotlib figure object for the residual plot
         '''
         regret_fig = self.plot_regret()
-        learning_fig = self.plot_learning_curve(n_violins)
+        learning_fig = self.plot_learning_curve(window)
         parity_fig = self.plot_parity()
         return regret_fig, learning_fig, parity_fig
 
@@ -207,32 +240,41 @@ class ActiveDiscoverer:
         _ = ax.set_xlabel('Number of discovery queries')  # noqa: F841
         _ = ax.set_ylabel('Cumulative regret [eV]')  # noqa: F841
         _ = fig.set_size_inches(15, 5)  # noqa: F841
+        _ = ax.get_xaxis().set_major_formatter(FORMATTER)
+        _ = ax.get_yaxis().set_major_formatter(FORMATTER)
         return fig
 
-    def plot_learning_curve(self, n_violins=20):
+    def plot_learning_curve(self, window=20, metric='mean'):
         '''
-        Plot the residuals over time
+        Plot the rolling average of the residuals over time
 
         Arg:
-            n_violins   The number of violins you want plotted
+            window  How many residuals to average at each point
+            metric  String indicating which metric you want to plot.
+                    Corresponds exactly to the methods of the
+                    `pandas.DataFrame.rolling` class, e.g., 'mean', 'median',
+                    'min', 'max', 'std', 'sum', etc.
         Returns:
             fig     The matplotlib figure object for the learning curve
         '''
-        # Figure out what violin number to label each residual with
-        chunked_residuals = [self.residuals[i::n_violins] for i in range(n_violins)]
-        violin_numbers = []
-        for violin_number, chunk in enumerate(chunked_residuals):
-            violin_numbers.extend([violin_number for _ in chunk])
+        # Format the data
+        df = pd.DataFrame(self.residuals, columns=['Residuals [eV]'])
+        rolling_residuals = getattr(df, 'Residuals [eV]').rolling(window=window)
+        rolled_values = getattr(rolling_residuals, metric)().values
+        query_numbers = list(range(len(rolled_values)))
 
         # Create and format the figure
         fig = plt.figure()
-        ax = sns.violinplot(violin_numbers, self.residuals, cut=0, scale='width')
-        _ = ax.set_xlabel('Optimization portion (~time)')  # noqa:  F841
-        _ = ax.set_ylabel('Residuals [eV]')  # noqa:  F841
+        ax = sns.lineplot(query_numbers, rolled_values)
+        _ = ax.set_xlabel('Number of discovery queries')
+        _ = ax.set_ylabel('Rolling %s of residuals (window = %i) [eV]' % (metric, window))
+        _ = ax.set_xlim([query_numbers[0], query_numbers[-1]])
         _ = fig.set_size_inches(15, 5)  # noqa: F841
+        _ = ax.get_xaxis().set_major_formatter(FORMATTER)
 
-        # Add a line at perfect residuals
-        _ = ax.plot([-1, max(violin_numbers)+1], [0, 0], '--')  # noqa: F841
+        # Add a dashed line at zero residuals
+        plt.plot([0, query_numbers[-1]], [0, 0], '--k')
+
         return fig
 
 
@@ -322,18 +364,7 @@ class RandomAdsorptionDiscoverer(AdsorptionDiscoverer):
         anything we chose from the `self.sampling_space` attribute.
         '''
         random.shuffle(self.sampling_space)
-        samples = []
-
-        # Simultaneously choose `self.batch_size` samples while removing them
-        # from the sampling space
-        for _ in range(self.batch_size):
-            try:
-                sample = self.sampling_space.pop()
-                samples.append(sample)
-            except IndexError:
-                break
-        self.training_batch = samples
-        self.next_batch_number += 1
+        self._pop_next_batch()
 
 
 class OmniscientAdsorptionDiscoverer(AdsorptionDiscoverer):
@@ -364,20 +395,8 @@ class OmniscientAdsorptionDiscoverer(AdsorptionDiscoverer):
         attribute. It will also remove anything we chose from the
         `self.sampling_space` attribute.
         '''
-        self.sampling_space.sort(key=lambda doc: abs(doc['energy'] - self.optimal_value),
-                                 reverse=True)
-        samples = []
-
-        # Simultaneously choose `self.batch_size` samples while removing them
-        # from the sampling space
-        for _ in range(self.batch_size):
-            try:
-                sample = self.sampling_space.pop()
-                samples.append(sample)
-            except IndexError:
-                break
-        self.training_batch = samples
-        self.next_batch_number += 1
+        self.sampling_space.sort(key=lambda doc: abs(doc['energy'] - self.optimal_value))
+        self._pop_next_batch()
 
 
 class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
@@ -419,7 +438,7 @@ class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
 
         # Retrain
         self.training_set.extend(self.training_batch)
-        self._train_tpot()
+        self.__train_tpot()
 
     def _train_preprocessor(self):
         '''
@@ -450,7 +469,7 @@ class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
             with open(cache_name, 'wb') as file_handle:
                 pickle.dump(preprocessing_pipeline, file_handle)
 
-    def _train_tpot(self):
+    def __train_tpot(self):
         '''
         Train TPOT using the `training_set` attached to the class
         '''
@@ -502,60 +521,291 @@ class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
 
         # Perform a weighted shuffling of the sampling space such that sites
         # with better energies are more likely to be early in the list
-        self.sampling_space = weighted_shuffle(self.sampling_space, probability_densities)
+        self.sampling_space = self.weighted_shuffle(self.sampling_space,
+                                                    probability_densities)
 
-        # Simultaneously choose `self.batch_size` samples while removing them
-        # from the sampling space
-        samples = []
-        for _ in range(self.batch_size):
+        self._pop_next_batch
+
+    @staticmethod
+    def weighted_shuffle(sequence, weights):
+        '''
+        This function will shuffle a sequence using weights to increase the chances
+        of putting higher-weighted elements earlier in the list. Credit goes to
+        Nicky Van Foreest, whose function I based this off of.
+
+        Args:
+            sequence    A sequence of elements that you want shuffled
+            weights     A sequence that is the same length as the `sequence` that
+                        contains the corresponding probability weights for
+                        selecting/choosing each element in `sequence`
+        Returns:
+            shuffled_list   A list whose elements are identical to those in the
+                            `sequence` argument, but randomly shuffled such that
+                            the elements with higher weights are more likely to
+                            be in the front/start of the list.
+        '''
+        shuffled_list = np.empty_like(sequence)
+
+        # Pack the elements in the sequences and their respective weights
+        pairings = list(zip(sequence, weights))
+        for i in range(len(pairings)):
+
+            # Randomly choose one of the elements, and get the corresponding index
+            cumulative_weights = np.cumsum([weight for _, weight in pairings])
+            rand = random.random() * cumulative_weights[-1]
+            j = bisect_right(cumulative_weights, rand)
+
+            # Pop the element out so we don't re-select
             try:
-                sample = self.sampling_space.pop(0)
-                samples.append(sample)
+                shuffled_list[i], _ = pairings.pop(j)
+
+            # Hack a quick fix to some errors I don't feel like solving
             except IndexError:
-                break
-        self.training_batch = samples
+                try:
+                    shuffled_list[i], _ = pairings.pop(-1)
+                except IndexError:
+                    break
+
+        return shuffled_list.tolist()
 
 
-def weighted_shuffle(sequence, weights):
+class BayesianOptimizer(AdsorptionDiscoverer):
     '''
-    This function will shuffle a sequence using weights to increase the chances
-    of putting higher-weighted elements earlier in the list. Credit goes to
-    Nicky Van Foreest, whose function I based this off of.
-
-    Args:
-        sequence    A sequence of elements that you want shuffled
-        weights     A sequence that is the same length as the `sequence` that
-                    contains the corresponding probability weights for
-                    selecting/choosing each element in `sequence`
-    Returns:
-        shuffled_list   A list whose elements are identical to those in the
-                        `sequence` argument, but randomly shuffled such that
-                        the elements with higher weights are more likely to
-                        be in the front/start of the list.
+    This "discoverer" is actually just a Bayesian optimizer for trying to find
+    adsorption energies.
     '''
-    shuffled_list = np.empty_like(sequence)
 
-    # Pack the elements in the sequences and their respective weights
-    pairings = list(zip(sequence, weights))
-    for i in range(len(pairings)):
+    def _train(self):
+        '''
+        Train the GP hyperparameters
+        '''
+        # Instantiate the preprocessor and GP if we haven't done so already
+        if not hasattr(self, 'preprocessor'):
+            self._train_preprocessor()
 
-        # Randomly choose one of the elements, and get the corresponding index
-        cumulative_weights = np.cumsum([weight for _, weight in pairings])
-        rand = random.random() * cumulative_weights[-1]
-        j = bisect_right(cumulative_weights, rand)
-
-        # Pop the element out so we don't re-select
+        # Calculate and save the residuals of this next batch
         try:
-            shuffled_list[i], _ = pairings.pop(j)
+            ml_energies, _ = self.__make_predictions(self.training_batch)
+            dft_energies = np.array([doc['energy'] for doc in self.training_batch])
+            residuals = ml_energies - dft_energies
+            self.residuals.extend(list(residuals))
+        # If this is the very first training batch, then we don't need to save
+        # the residuals
+        except AttributeError:
+            pass
 
-        # Hack a quick fix to some errors I don't feel like solving
-        except IndexError:
-            try:
-                shuffled_list[i], _ = pairings.pop(-1)
-            except IndexError:
-                break
+        # Mandatory extension of the training set to include this next batch
+        self.training_set.extend(self.training_batch)
+        # Re-train on the whole training set
+        self.__init_GP()
+        _ = self.__train_GP()
 
-    return shuffled_list.tolist()
+    def _train_preprocessor(self):
+        '''
+        Trains the preprocessing pipeline and assigns it to the `preprocessor`
+        attribute.
+        '''
+        # Open the cached preprocessor
+        try:
+            cache_name = 'caches/preprocessor.pkl'
+            with open(cache_name, 'rb') as file_handle:
+                self.preprocessor = pickle.load(file_handle)
+
+        # If there is no cache, then remake it
+        except FileNotFoundError:
+            inner_fingerprinter = fingerprinters.InnerShellFingerprinter()
+            outer_fingerprinter = fingerprinters.OuterShellFingerprinter()
+            fingerprinter = fingerprinters.StackedFingerprinter(inner_fingerprinter,
+                                                                outer_fingerprinter)
+            scaler = StandardScaler()
+            pca = PCA()
+            preprocessing_pipeline = Pipeline([('fingerprinter', fingerprinter),
+                                               ('scaler', scaler),
+                                               ('pca', pca)])
+            preprocessing_pipeline.fit(self.training_batch)
+            self.preprocessor = preprocessing_pipeline
+
+            # Cache it for next time
+            with open(cache_name, 'wb') as file_handle:
+                pickle.dump(preprocessing_pipeline, file_handle)
+
+    def __init_GP(self):
+        '''
+        Initialize the exact GP model and assign the appropriate class attributes
+
+        Returns:
+            train_x     A `torch.Tensor` of the featurization of the current
+                        training set
+            train_y     A `torch.Tensor` of the output of the current training set
+        '''
+        # Grab the initial training data from the current (probably first)
+        # training batch
+        train_x = torch.Tensor(self.preprocessor.transform(self.training_set))
+        train_y = torch.Tensor([doc['energy'] for doc in self.training_set])
+
+        # Initialize the GP
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        self.GP = ExactGPModel(train_x, train_y, self.likelihood)
+
+        # Optimize the GP hyperparameters
+        self.GP.train()
+        self.likelihood.train()
+
+        # Set the optimizer that will tune parameters during training:  ADAM
+        self.optimizer = torch.optim.Adam([{'params': self.GP.parameters()}], lr=0.1)
+
+        # Set the "loss" function:  marginal log likelihood
+        self.loss = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.GP)
+
+        return train_x, train_y
+
+    def __make_predictions(self, docs):
+        '''
+        Use the GP to make predictions on the current training batch
+
+        Args:
+            docs    A list of dictionaries that correspond to the sites you
+                    want to make predictions on
+        Returns:
+            means   A numpy array giving the GP's mean predictions for the
+                    `docs` you gave this method.
+            stdevs  A numpy array giving the GP's standard deviation/standard
+                    error predictions for the `docs` you gave this method.
+        '''
+        # Get into evaluation (predictive posterior) mode
+        self.GP.eval()
+        self.likelihood.eval()
+
+        # Make the predictions
+        features = torch.Tensor(self.preprocessor.transform(docs))
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            predictions = self.GP(features)
+
+        # Format and return the predictions
+        means = predictions.mean.cpu().detach().numpy()
+        stdevs = predictions.stddev.cpu().detach().numpy()
+        return means, stdevs
+
+    def __train_GP(self):
+        '''
+        Re-trains the GP on all of the training data
+        '''
+        # Re-initialize the GP
+        train_x, train_y = self.__init_GP()
+
+        # If the loss increases too many times in a row, we will stop the
+        # tuning short. Here we initialize some things to keep track of this.
+        current_loss = float('inf')
+        loss_streak = 0
+
+        # Do at most 50 iterations of training
+        for i in tqdm(range(50), desc='GP tuning'):
+
+            # Zero backprop gradients
+            self.optimizer.zero_grad()
+            # Get output from model
+            output = self.GP(train_x)
+            # Calc loss and backprop derivatives
+            loss = -self.loss(output, train_y)
+            loss.backward()
+            self.optimizer.step()
+
+            # Stop training if the loss increases twice in a row
+            new_loss = loss.item()
+            if new_loss > current_loss:
+                loss_streak += 1
+                if loss_streak >= 2:
+                    break
+            else:
+                current_loss = new_loss
+                loss_streak = 0
+
+    def _choose_next_batch(self):
+        self.__sort_sampling_space_by_EI()
+        self._pop_next_batch()
+
+    def __sort_sampling_space_by_EI(self):
+        '''
+        Brute-force calculate the expected improvement for each of the sites in
+        the sampling space.
+
+        An explanation of the formulas used here can be found on
+        http://krasserm.github.io/2018/03/21/bayesian-optimization/
+
+        Here are the equations we used:
+            EI = E[max(f(x) - f(x+), 0)]
+               = (mu(x) - f(x+) - xi) * Phi(Z) + sigma(x)*phi(Z) if sigma(x) > 0
+                                                                    sigma(x) == 0
+            Z = (mu(x) - f(x+) - xi) / sigma(x)     if sigma(x) > 0
+                0                                      sigma(x) == 0
+
+        EI = expected improvement
+        mu(x) = GP's estimate of the mean value at x
+        sigma(x) = GP's standard error/standard deviation estimate at x
+        f(x+) = best objective value observed so far
+        xi = exploration/exploitation balance factor (higher value promotes exploration)
+        Phi(Z) = cumulative distribution function of normal distribution at Z
+        phi(Z) = probability distribution function of normal distribution at Z
+        Z = test statistic at x
+        '''
+        # Initialize by getting all the GP predictions, the best energy so far,
+        # and setting an exploration/exploitation value.
+        means, stdevs = self.__make_predictions(self.sampling_space)
+        f_best = min(abs(doc['energy'] - self.optimal_value)
+                     for doc in self.training_set)
+        xi = 0.01
+
+        # Calculate EI for every single point we may sample
+        for doc, mu, sigma in zip(self.sampling_space, means, stdevs):
+
+            # Calculate the test statistic
+            if sigma > 0:
+                Z = (mu - f_best - xi) / sigma
+            elif sigma == 0:
+                Z = 0.
+            else:
+                raise RuntimeError('Got a negative standard error from the GP')
+
+            # Calculate EI
+            Phi = norm.cdf(Z)
+            phi = norm.pdf(Z)
+            if sigma > 0:
+                EI = (mu - f_best - xi)*Phi + sigma*phi
+            elif sigma == 0:
+                EI = 0.
+
+            # Save the EI results directly to the sampling space, then sort our
+            # sampling space by it. High values of EI will show up first in the
+            # list.
+            doc['EI'] = EI
+        self.sampling_space.sort(key=lambda doc: doc['EI'], reverse=True)
+
+
+class ExactGPModel(gpytorch.models.ExactGP):
+    '''
+    We will use the simplest form of GP model with exact inference. This is
+    taken from one of GPyTorch's tutorials.
+    '''
+    def __init__(self, train_x, train_y, likelihood):
+        '''
+        Args:
+            train_x     A numpy array with your training features
+            train_y     A numpy array with your training labels
+            likelihood  An instance of one of the `gpytorch.likelihoods.*` classes
+        '''
+        # Convert the training data into tensors, which GPyTorch needs to run
+        train_x = torch.Tensor(train_x)
+        train_y = torch.Tensor(train_y)
+
+        # Initialize the model
+        super().__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 
 def benchmark_adsorption_regret(discoverers):
@@ -636,9 +886,8 @@ def benchmark_adsorption_regret(discoverers):
     _ = example_ax.set_xlabel('Number of discovery queries')  # noqa: F841
     _ = example_ax.set_ylabel('Cumulative regret [eV]')  # noqa: F841
     # Add commas to axes ticks
-    formatter = ticker.FuncFormatter(lambda x, p: format(int(x), ','))
-    _ = example_ax.get_xaxis().set_major_formatter(formatter)
-    _ = example_ax.get_yaxis().set_major_formatter(formatter)
+    _ = example_ax.get_xaxis().set_major_formatter(FORMATTER)
+    _ = example_ax.get_yaxis().set_major_formatter(FORMATTER)
     # Set bounds/limits
     _ = example_ax.set_xlim([0, sampling_sizes[-1]])  # noqa: F841
     _ = example_ax.set_ylim([0, random_discoverer.regret_history[-1]])  # noqa: F841
