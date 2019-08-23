@@ -9,6 +9,7 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 import gc
 import sys
+from abc import abstractmethod
 import math
 import random
 import warnings
@@ -40,34 +41,12 @@ with warnings.catch_warnings():
 FORMATTER = ticker.FuncFormatter(lambda x, p: format(int(x), ','))
 
 
-class ActiveDiscoverer:
+class ActiveDiscovererBase:
     '''
     This is a parent class for simulating active discovery routines. The
     child classes are meant to be used to judge the efficacy of training
     ando/or acquisition routines. It does so by "simulating" what the routine
     would have done given a particular sampling space.
-
-    Required methods:
-        _update_regret      This method should take the output of the
-                            `choose_next_batch` method and then use it to
-                            calculate the new cumulative regret. It should then
-                            append it to the `regret_history` attribute.
-        _train              This method should take the output of the
-                            `choose_next_batch` method; calculate the current
-                            model's residuals on that batch and extend them
-                            onto the `residuals` attribute; use the training
-                            batch [re]train the surrogate model; and finally
-                            extend the `self.training_set` attribute with the
-                            batch that it is passed.
-        _choose_next_batch  This method should choose `self.batch_size` samples
-                            from the `self.sampling_space` attribute, then
-                            put them into a list and assign it to the
-                            `self.training_batch` attribute. It should also
-                            remove anything it selected from the
-                            `self.sampling_space` attribute.
-        plot_parity         This method should return an instance of a
-                            `matplotlib.pyplot.figure` object with the parity
-                            plotted.
     '''
     def __init__(self, optimal_value, training_set, sampling_space,
                  init_train=True, batch_size=200):
@@ -132,6 +111,36 @@ class ActiveDiscoverer:
         # Make sure it was done correctly
         self.__assert_correct_hallucination()
 
+    @abstractmethod
+    def _choose_next_batch(self):
+        '''
+        This method should choose `self.batch_size` samples from the
+        `self.sampling_space` attribute, then put them into a list and assign
+        it to the `self.training_batch` attribute. It should also remove
+        anything it selected from the `self.sampling_space` attribute.
+        '''
+        pass
+
+    @abstractmethod
+    def _train(self):
+        '''
+        This method should take the output of the `choose_next_batch` method;
+        calculate the current model's residuals on that batch and extend them
+        onto the `residuals` attribute; use the training batch [re]train the
+        surrogate model; and finally extend the `self.training_set` attribute
+        with the batch that it is passed.
+        '''
+        pass
+
+    @abstractmethod
+    def _update_regret(self):
+        '''
+        This method should take the output of the `choose_next_batch` method
+        and then use it to calculate the new cumulative regret. It should then
+        append it to the `regret_history` attribute.
+        '''
+        pass
+
     def __assert_correct_hallucination(self):
         '''
         There are quite a few things that the user needs to do correctly to
@@ -144,7 +153,7 @@ class ActiveDiscoverer:
             self.__previous_sampling_space_len = len(self.sampling_space)
         except AssertionError as error:
             message = ('\nWhen creating the `_choose_next_batch` method for '
-                       'a child-class of `ActiveDiscoverer`, you need to '
+                       'a child-class of `ActiveDiscovererBase`, you need to '
                        'remove the chosen batch from the `sampling_space` '
                        'attribute.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -155,7 +164,7 @@ class ActiveDiscoverer:
             self.__previous_training_set_len = len(self.training_set)
         except AssertionError as error:
             message = ('\nWhen creating the `_train` method for a '
-                       'child-class of `ActiveDiscoverer`, you need to extend '
+                       'child-class of `ActiveDiscovererBase`, you need to extend '
                        'the `training_set` attribute with the new training '
                        'batch.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -166,7 +175,7 @@ class ActiveDiscoverer:
             self.__previous_residuals_len = len(self.residuals)
         except AssertionError as error:
             message = ('\nWhen creating the `_train` method for a '
-                       'child-class of `ActiveDiscoverer`, you need to extend '
+                       'child-class of `ActiveDiscovererBase`, you need to extend '
                        'the `residuals` attribute with the model\'s residuals '
                        'of the new batch (before retraining).')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -177,7 +186,7 @@ class ActiveDiscoverer:
             self.__previous_regret_history_len = len(self.regret_history)
         except AssertionError as error:
             message = ('\nWhen creating the `_update_regret` method for a '
-                       'child-class of `ActiveDiscoverer`, you need to append '
+                       'child-class of `ActiveDiscovererBase`, you need to append '
                        'the `regret_history` attribute with the cumulative '
                        'regret given the new batch.')
             raise type(error)(str(error) + message).with_traceback(sys.exc_info()[2])
@@ -277,19 +286,22 @@ class ActiveDiscoverer:
 
         return fig
 
+    @abstractmethod
+    def plot_parity(self):
+        '''
+        This method should return an instance of a `matplotlib.pyplot.figure`
+        object with the parity plotted.
+        '''
+        pass
 
-class AdsorptionDiscoverer(ActiveDiscoverer):
+
+class AdsorptionDiscovererBase(ActiveDiscovererBase):
     '''
-    Here we extend the `ActiveDiscoverer` class while making the following
+    Here we extend the `ActiveDiscovererBase` class while making the following
     assumptions:  1) we are trying to optimize the adsorption energy and 2) our
     inputs are a list of dictionaries with the 'energy' key.
     '''
     def _update_regret(self):
-        '''
-        Calculates the cumulative regret of the discovery thus far. Assumes
-        that your sampling space is a list of dictionaries, and that the key
-        you want to optimize is 'energy'.
-        '''
         # Find the current regret
         regret = self.regret_history[-1]
 
@@ -332,7 +344,7 @@ class AdsorptionDiscoverer(ActiveDiscoverer):
         return fig
 
 
-class RandomAdsorptionDiscoverer(AdsorptionDiscoverer):
+class RandomAdsorptionDiscoverer(AdsorptionDiscovererBase):
     '''
     This discoverer simply chooses new samples randomly. This is intended to be
     used as a baseline for active discovery.
@@ -367,7 +379,7 @@ class RandomAdsorptionDiscoverer(AdsorptionDiscoverer):
         self._pop_next_batch()
 
 
-class OmniscientAdsorptionDiscoverer(AdsorptionDiscoverer):
+class OmniscientAdsorptionDiscoverer(AdsorptionDiscovererBase):
     '''
     This discoverer has perfect knowledge of all data points and chooses the
     best ones perfectly. No method can beat this, and as such it provides a
@@ -399,7 +411,7 @@ class OmniscientAdsorptionDiscoverer(AdsorptionDiscoverer):
         self._pop_next_batch()
 
 
-class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
+class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscovererBase):
     '''
     This discoverer uses a Gaussian selection method with a TPOT model to select
     new sampling points.
@@ -569,7 +581,7 @@ class TPOTGaussianAdsorptionDiscoverer(AdsorptionDiscoverer):
         return shuffled_list.tolist()
 
 
-class BayesianOptimizer(AdsorptionDiscoverer):
+class BayesianOptimizer(AdsorptionDiscovererBase):
     '''
     This "discoverer" is actually just a Bayesian optimizer for trying to find
     adsorption energies.
@@ -810,14 +822,14 @@ class ExactGPModel(gpytorch.models.ExactGP):
 
 def benchmark_adsorption_regret(discoverers):
     '''
-    This function will take the regret curves of trained `AdsorptionDiscoverer`
-    instances and the compare them to the floor and ceilings of performance for
-    you.
+    This function will take the regret curves of trained
+    `AdsorptionDiscovererBase` instances and the compare them to the floor and
+    ceilings of performance for you.
 
     Arg:
         discoverers     A dictionary whose keys are the string names that you
                         want to label each discoverer with and whose values are
-                        the trained instances of an `AdsorptionDiscoverer`
+                        the trained instances of an `AdsorptionDiscovererBase`
                         where the `simulate_discovery` methods for each are
                         already executed.
     Returns:
