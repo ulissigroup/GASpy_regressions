@@ -1,50 +1,25 @@
-FROM jupyter/tensorflow-notebook
-LABEL maintainers.owner="Zack Ulissi <zulissi@andrew.cmu.edu>"
-LABEL maintainers.maintainer0="Kevin Tran <ktran@andrew.cmu.edu>"
-SHELL ["/bin/bash", "-c"]
+FROM ulissigroup/gaspy:latest
 
-# Install GASpy. Note that we install it by assuming that the user will mount
-# their working version of GASpy to the container.
-ENV GASPY_HOME=$HOME/GASpy
-RUN mkdir -p $GASPY_HOME
-ENV PYTHONPATH $GASPY_HOME:$GASPY_HOME/GASpy_regressions
+# Reset the default user to `root` so that we can make changes
+USER root
 
-# Install conda packages
-# deap, update_checker, tqdm, stopit, and xgboost are TPOT dependencies.
-RUN conda config --prepend channels conda-forge
-RUN conda config --append channels matsci
-RUN conda config --append channels pytorch
+# Install new conda packages
 RUN conda config --append channels lmmentel
+RUN conda config --append channels pytorch
+RUN conda config --append channels gpytorch
 RUN conda install \
-    pytest=3.8.0 \
-    mongodb=4.0.2   pymongo=3.7.1 \
-    multiprocess=0.70.5 \
-    ase=3.17.0 \
-    pymatgen=2018.9.1 \
-    fireworks=1.7.2 \
-    mendeleev=0.4.3 \
-    luigi=2.7.8 \
-    plotly=3.2.0 \
-    pytorch=0.4.1  torchvision=0.2.1 \
-    deap=1.2.2  update_checker=0.16 tqdm=4.24.0 stopit=1.1.2 xgboost=0.80 \
-    skorch=0.3.0
-
-# Pip installations go last, because pip often messes things up.
-RUN pip install tpot
-RUN pip install git+https://github.com/rossant/ipycache.git
-
-# Manually install Magpie
-RUN git clone https://github.com/ulissigroup/magpie_python.git
-ENV PYTHONPATH $PYTHONPATH:$HOME/magpie_python
+    seaborn>=0.9.0  plotly>=3.2.0 \
+    mendeleev>=0.4.3 \
+    tensorflow>=1.14.0  tensorflow-gpu>=1.14.0 \
+    pytorch>=1.1.0  torchvision>=0.2.1 \
+    gpytorch>=0.3.4 \
+    skorch>=0.3.0 \
+    tpot>=0.9.5 xgboost>=0.80
+RUN conda clean -lity
 
 # Patch skorch
-RUN sed -i '/Dataset\ does\ not\ have consistent\ lengths/s/^/#/g' /opt/conda/lib/python3.6/site-packages/skorch/dataset.py
-RUN sed -i '/if\ len(len_set)\ !=\ 1:/s/^/#/g' /opt/conda/lib/python3.6/site-packages/skorch/dataset.py
+RUN sed -i '/Dataset\ does\ not\ have consistent\ lengths/s/^/#/g' /miniconda3/lib/python3.6/site-packages/skorch/dataset.py
+RUN sed -i '/if\ len(len_set)\ !=\ 1:/s/^/#/g' /miniconda3/lib/python3.6/site-packages/skorch/dataset.py
 
-# The $HOME/.ssh mount is so that you can mount your ~/.ssh into it, so that
-# you can freely log into other things from inside the container.
-# The $GASPY_HOME mount is so that you can use whatever version of GASpy.
-# We do this near the end because we can't modify mounted folders after
-# declaring them as volumes.
-RUN mkdir -p $HOME/.ssh
-VOLUME $HOME/.ssh $GASPY_HOME
+# Set the default user back to `user` so that we can use Shifter
+USER user
