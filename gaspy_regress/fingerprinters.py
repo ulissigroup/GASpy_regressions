@@ -265,10 +265,19 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
                         are all of the MPIDs we can find in the catalog
                         and adsorption collections.
         '''
-        elements = []
-        for mpid, composition in self.compositions_by_mpid_.items():
-            elements.extend(composition)
-        self.elements_ = set(elements)
+        elements = set()
+
+        # First grab all of the things in our cache of bulks
+        for _, composition in self.compositions_by_mpid_.items():
+            elements = elements | set(composition)
+
+        # Then add in anything in our training data
+        for doc in self.adsorption_docs:
+            for neighbor in doc['neighborcoord']:
+                next_neighbors = neighbor.split(':')[-1].split('-')
+                elements = elements | set(next_neighbors)
+
+        self.elements_ = elements
 
 
     def _get_mendeleev_data(self):
@@ -299,26 +308,43 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
                                         the median adsorption energy of their
                                         respective adsorbate-element pairing.
         '''
-        # Get all of the monometallic adsorption energies
+        # Get all of the monometallic adsorption energies by first filtering
+        # out calculations on non-monometallics (i.e., those whose bulk
+        # compositions have more than one element)
         adsorption_energies = defaultdict(dict)
         for doc in self.adsorption_docs:
-            composition = self.compositions_by_mpid_[doc['mpid']]
+            if 'mpid' in doc:
+                mpid = doc['mpid']
+                composition = self.compositions_by_mpid_[mpid]
+
+            # If we're not using MPIDs, then guess the bulk structure
+            else:
+                elements = {element
+                            for neighbor in doc['neighborcoord']
+                            for element in neighbor.split(':')[-1].split('-')}
+                composition = list(elements)
+                warnings.warn('Not all of your training data may have MPIDs. We '
+                              'will assume that you are trying to train '
+                              'structures not from The Materials Project. This '
+                              'means we have to guess the bulk composition. '
+                              'Incorrect guesses may lead to errors. Use at your '
+                              'own risk. If you are using Materials Project '
+                              'structures, then ensure that the "mpid" key is in '
+                              'each of your training documents.', RuntimeWarning)
+
+            # Grab only the data from monometallics
             if len(composition) == 1:
                 element = composition[0]
                 adsorbate = doc['adsorbate']
                 adsorption_energies[adsorbate][element] = doc['energy']
 
-        # Define all the elements in our training set so we can make sure we
-        # try to find adsorption energies for each of them.
-        elements = {element
-                    for composition in self.compositions_by_mpid_.values()
-                    for element in composition}
-
         # Calculate the median of the energies for each adsorbate-element
         # pairing
         median_adsorption_energies = defaultdict(dict)
-        for adsorbate, energies_by_element in adsorption_energies.items():
-            for element in elements:
+        adsorbates = {doc['adsorbate'] for doc in self.adsorption_docs}
+        for adsorbate in adsorbates:
+            energies_by_element = adsorption_energies[adsorbate]
+            for element in self.elements_:
                 try:
                     energies = energies_by_element[element]
                     median = np.median(energies)
