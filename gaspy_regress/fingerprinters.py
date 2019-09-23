@@ -7,6 +7,7 @@ so that they can be fed into regression pipelines.
 __author__ = 'Kevin Tran'
 __email__ = 'ktran@andrew.cmu.edu'
 
+from collections import defaultdict
 import warnings
 from abc import ABC, abstractmethod
 import pickle
@@ -118,20 +119,36 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
         '''
         fingerprint = []
         shell_atoms = self._concatenate_shell(doc)
+        adsorbate = doc['adsorbate']
 
         # Add and sort the elemental information for each element present
         for element in set(shell_atoms):
-            energy = self.median_adsorption_energies_[element]
             element_data = self.mendeleev_data_[element]
             atomic_number = element_data.atomic_number
             electronegativity = element_data.electronegativity(scale='pauling')
             count = shell_atoms.count(element)
-            fingerprint.append((energy, atomic_number, electronegativity, count))
+            # A bunch of EAFP to tell the user if they're doing something wrong
+            try:
+                median_energies_by_element = self.median_adsorption_energies_[adsorbate]
+                try:
+                    median_energy = median_energies_by_element[element]
+                except KeyError:
+                    raise RuntimeError('You did not initialize the '
+                                       'fingerprinter with the %s element, and '
+                                       'so we cannot make predictions on it.'
+                                       % element)
+            except KeyError:
+                raise RuntimeError('You did not initialize the fingerprinter '
+                                   'with the %s adsorbate, and so we cannot make'
+                                   'predictions on it.' % adsorbate)
+            # Concatenate and sort. We sort to make things easier to the ML
+            # models to parse.
+            fingerprint.append((median_energy, atomic_number, electronegativity, count))
         fingerprint = sorted(fingerprint)
 
         # Fill in the dummy fingerprints
         for _ in range(len(fingerprint), self.max_num_species_):
-            fingerprint.append(self.dummy_fp_)
+            fingerprint.append(self.dummy_fp_[adsorbate])
 
         return np.array(fingerprint).flatten()
 
@@ -156,24 +173,35 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
         the atomic count.
 
         Resulting attributes:
-            dummy_fp_   A 4-tuple that represents a single fingerprint,
-                        but has the "dummy" values
+            dummy_fp_   A dictionary whose keys are adsorbates and whose values
+                        are 4-tuples that represents a single fingerprint, but
+                        has the "dummy" values
         '''
         # Prerequisite calculations
         self._get_compositions_by_mpid()
         self._get_elements_in_scope()
         self._get_mendeleev_data()
         self._calculate_median_adsorption_energies()
-        elements = set(self.median_adsorption_energies_.keys())
+        elements = {element
+                    for energies_by_element in self.median_adsorption_energies_.values()
+                    for element in energies_by_element}
 
-        # Calculate `dummy_fp_`
-        avg_median_energy = np.average(list(self.median_adsorption_energies_.values()))
+        # Calculate `dummy_fp_` elements that are element-based
         avg_atomic_num = np.average([self.mendeleev_data_[element].atomic_number
                                      for element in elements])
         avg_electroneg = np.average([self.mendeleev_data_[element].electronegativity(scale='pauling')
                                      for element in elements])
         dummy_count = 0
-        self.dummy_fp_ = (avg_median_energy, avg_atomic_num, avg_electroneg, dummy_count)
+
+        # Calculate the adsorbate-specific average-median binding energies
+        self.dummy_fp_ = {}
+        for adsorbate, median_energies_by_element in self.median_adsorption_energies_.items():
+            energies = list(median_energies_by_element.values())
+            avg_median_energy = np.mean(energies)
+
+            # Assign the dummy fingerprints
+            self.dummy_fp_[adsorbate] = (avg_median_energy, avg_atomic_num,
+                                         avg_electroneg, dummy_count)
 
 
     def _get_compositions_by_mpid(self):
@@ -265,34 +293,54 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
 
     def _calculate_median_adsorption_energies(self):
         '''
-        This method calculates the median adsorption energies on each monometallic bulk.
+        This method calculates the median adsorption energies on each
+        monometallic bulk.
 
         Resulting attribute:
-            median_adsorption_energies_ A dictionary whose keys are the substrate elements
-                                        found in `docs` and whose values are the median
-                                        adsorption energy for that element (as per the
-                                        doc['energy'] values in `docs`).
+            median_adsorption_energies_ A nested dictionary first layer of keys
+                                        are the adsorbate and whose second
+                                        layer are the element. The values are
+                                        the median adsorption energy of their
+                                        respective adsorbate-element pairing.
         '''
-        # Calculate the median adsorption energy for each element
-        median_adsorption_energies = dict.fromkeys(self.elements_)
-        for element in median_adsorption_energies:
-            energies = []
-            for doc in self.adsorption_docs:
-                composition = self.compositions_by_mpid_[doc['mpid']]
-                if len(composition) == 1 and composition[0] == element:
-                    energies.append(doc['energy'])
-            median = np.median(energies)
+        # Get all of the monometallic adsorption energies
+        adsorption_energies = defaultdict(dict)
+        for doc in self.adsorption_docs:
+            composition = self.compositions_by_mpid_[doc['mpid']]
+            if len(composition) == 1:
+                element = composition[0]
+                adsorbate = doc['adsorbate']
+                adsorption_energies[adsorbate][element] = doc['energy']
 
-            # Sometimes our data is sparse and yields no energies to take medians on.
-            # When this happens, just take the median of all elements.
-            if np.isnan(median):
-                energies = [doc['energy'] for doc in self.adsorption_docs]
-                median = np.median(energies)
-                message = ('We do not have any energy data for %s, so we set its median '
-                           'adsorption energy as the median of all energies' % element)
-                warnings.warn(message, RuntimeWarning)
+        # Define all the elements in our training set so we can make sure we
+        # try to find adsorption energies for each of them.
+        elements = {element
+                    for composition in self.compositions_by_mpid_.values()
+                    for element in composition}
 
-            median_adsorption_energies[element] = median
+        # Calculate the median of the energies for each adsorbate-element
+        # pairing
+        median_adsorption_energies = defaultdict(dict)
+        for adsorbate, energies_by_element in adsorption_energies.items():
+            for element in elements:
+                try:
+                    energies = energies_by_element[element]
+                    median = np.median(energies)
+
+                # Sometimes our data is sparse and yields no energies to take
+                # medians on. When this happens, just take the median of all
+                # elements.
+                except KeyError:
+                    energies = [doc['energy'] for doc in self.adsorption_docs
+                                if doc['adsorbate'] == adsorbate]
+                    median = np.median(energies)
+                    message = ('We do not have any energy data for %s on %s, so '
+                               'we set its median adsorption energy as the '
+                               'median of all %s energies'
+                               % (adsorbate, element, adsorbate))
+                    warnings.warn(message, RuntimeWarning)
+                median_adsorption_energies[adsorbate][element] = median
+
         self.median_adsorption_energies_ = median_adsorption_energies
 
 
