@@ -7,7 +7,7 @@
 # that assumes that you are running this script inside GASpy.
 gaspy_regressions_path=$(pwd)
 gaspy_path="$(dirname "$gaspy_regressions_path")"
-gaspy_mounting_config="$gaspy_path:/home/jovyan/GASpy"
+gaspy_mounting_config="$gaspy_path:/home/GASpy"
 
 # Now open the container
-shifter --image=ulissigroup/gaspy_regressions:latest --volume=$gaspy_mounting_config --volume=$HOME/.ssh:/home/jovyan/.ssh bash -i
+shifter --image=ulissigroup/gaspy_regressions:latest --volume=$gaspy_mounting_config --volume=$HOME/.ssh:/home/.ssh bash -i
