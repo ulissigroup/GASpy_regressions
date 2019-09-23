@@ -57,8 +57,6 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
         '''
         # Get the data that we need to calculate the prerequisite information
         self.adsorption_docs = X
-        if not hasattr(self, 'catalog_docs'):
-            self.catalog_docs = get_catalog_docs()
 
         # Calculate the information we need to make a fingerprint
         self._calculate_dummy_fp()
@@ -66,7 +64,6 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
 
         # Delete some data to save memory
         del self.adsorption_docs
-        del self.catalog_docs
 
         return self
 
@@ -218,40 +215,39 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
                                     cached and therefore may have extra
                                     key:value pairings that you may not need.
         '''
-        # Find the current cache of compositions. If it's not there, then
-        # initialize it as an empty dict
+        # Find the current cache of compositions.
         try:
             with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'rb') as file_handle:
                 compositions_by_mpid = pickle.load(file_handle)
+
+        # If the cache is not there, then create it
         except FileNotFoundError:
             compositions_by_mpid = {}
 
-        # Figure out which compositions we still need to figure out
-        known_mpids = set(compositions_by_mpid.keys())
-        required_mpids = (set(doc['mpid'] for doc in self.adsorption_docs) |  # noqa: W504
-                          set(doc['mpid'] for doc in self.catalog_docs))
-        unknown_mpids = required_mpids - known_mpids
+            # Figure out which compositions we still need to figure out
+            catalog_docs = get_catalog_docs()
+            mpids = {doc['mpid'] for doc in self.adsorption_docs + catalog_docs}
 
-        # If necessary, find the unknown compositions from The Materials Project
-        # and save them to the cache
-        if unknown_mpids:
             # Each MP document may contain several MPIDs. Here we get every
             # single document whose list of associated MPIDs matches anything
             # in our list of missing MPIDs.
             with MPRester(read_rc('matproj_api_key')) as rester:
-                query = {'task_ids': {'$elemMatch': {'$in': list(unknown_mpids)}}}
+                query = {'task_ids': {'$elemMatch': {'$in': list(mpids)}}}
                 properties = ['elements', 'task_ids']
                 mp_docs = rester.query(criteria=query,
                                        properties=properties)
+
             # Match the MP documents to our missing MPIDs.
-            for mpid in unknown_mpids:
+            for mpid in mpids:
                 for doc in mp_docs:
                     if mpid in set(doc['task_ids']):
                         compositions_by_mpid[mpid] = doc['elements']
                         break
+
             # Save the updated cache
             with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'wb') as file_handle:
                 pickle.dump(compositions_by_mpid, file_handle)
+
         self.compositions_by_mpid_ = compositions_by_mpid
 
 
@@ -355,7 +351,7 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
                                 present in any single mpid we are looking at. This is useful
                                 for figuring out how many dummy features you need to add.
         '''
-        mpids = set(doc['mpid'] for doc in self.catalog_docs)
+        mpids = set(self.compositions_by_mpid_.keys())
         num_species_per_mpid = [len(self.compositions_by_mpid_[mpid]) for mpid in mpids]
         self.max_num_species_ = max(num_species_per_mpid)
 
