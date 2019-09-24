@@ -8,7 +8,7 @@
 #SBATCH --account=m2755
 #SBATCH --qos=regular
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
-#SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/jovyan/GASpy
+#SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
 #SBATCH --job-name=regress
 #SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs
 #SBATCH --output=regressions.log

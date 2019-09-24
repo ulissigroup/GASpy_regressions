@@ -8,7 +8,7 @@
 #SBATCH --account=m2755
 #SBATCH --qos=low
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
-#SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/jovyan/GASpy
+#SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
 #SBATCH --job-name=push
 #SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs
 #SBATCH --output=regressions.log
@@ -17,5 +17,5 @@
 
 shifter \
     --image=ulissigroup/gaspy_regressions:latest \
-    --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/jovyan/GASpy \
+    --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy \
     python -c "from gaspy_regress import save_predictions; save_predictions()"
