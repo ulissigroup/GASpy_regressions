@@ -15,4 +15,7 @@
 #SBATCH --error=regressions.log
 #SBATCH --open-mode=append
 
+# OMP has some bug that needs this flag, now
+export KMP_INIT_AT_FORK=FALSE
+
 srun shifter python -c "from gaspy_regress import fit_model0_adsorption_energies; fit_model0_adsorption_energies('O')"
