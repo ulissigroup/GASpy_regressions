@@ -21,5 +21,8 @@ RUN conda clean -lity
 RUN sed -i '/Dataset\ does\ not\ have consistent\ lengths/s/^/#/g' /miniconda3/lib/python3.6/site-packages/skorch/dataset.py
 RUN sed -i '/if\ len(len_set)\ !=\ 1:/s/^/#/g' /miniconda3/lib/python3.6/site-packages/skorch/dataset.py
 
+# Add GASpy_regressions to the python path
+ENV PYTHONPATH $GASPY_HOME:$GASPY_HOME/GASpy_regressions
+
 # Set the default user back to `user` so that we can use Shifter
 USER user
