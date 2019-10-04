@@ -96,7 +96,13 @@ def cache_predictions(adsorbate, model_name='model0', processes=32):
                         documents in our catalog and whose values are floats of
                         the adsorption energy prediction of that document.
     '''
+    # We'll make the predictions on our catalog, whose documents have no
+    # adsorbates associated with them. The fingerprinter (the first step in the
+    # pipeline) needs to know the adsorbate though, so we add that information
+    # here.
     docs = get_catalog_docs()
+    for doc in docs:
+        doc['adsorbate'] = adsorbate
 
     # Load the model/pipeline
     file_name = GASDB_LOCATION + '/pipeline_%s_%s.pkl' % (adsorbate, model_name)
