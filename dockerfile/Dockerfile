@@ -7,14 +7,18 @@ USER root
 RUN conda config --append channels lmmentel
 RUN conda config --append channels pytorch
 RUN conda config --append channels gpytorch
+RUN conda config --append channels plotly
 RUN conda install \
-    seaborn>=0.9.0  plotly>=3.2.0 \
+    seaborn>=0.9.0 \
     mendeleev>=0.4.3 \
     tensorflow>=1.14.0  tensorflow-gpu>=1.14.0 \
     pytorch>=1.1.0  torchvision>=0.2.1 \
     gpytorch>=0.3.4 \
     skorch>=0.3.0 \
-    tpot>=0.9.5 xgboost>=0.80
+    tpot>=0.9.5 xgboost>=0.80 \
+    plotly>=4.1.1 \
+    chart-studio>=1.0.0
+    
 RUN conda clean -lity
 
 # Patch skorch
