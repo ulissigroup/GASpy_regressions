@@ -1,6 +1,9 @@
 '''
 This submodule is meant to create plots to analyze our
 database of adsorption results 2-dimentionally.
+i.e. E_adsorbate1 vs. E_adsorbate2.
+E is dE by default, but we can add correction values 
+to change it to dG.
 '''
 
 __author__ = 'Aini Palizhati'
@@ -13,8 +16,10 @@ import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
-from plotly import plotly
-import plotly.graph_objs as go
+from chart_studio import plotly
+import plotly.graph_objects as go
+import plotly.io as pio 
+pio.templates.default = "none" #use this to get rid of the default blue grid background
 from pymatgen.ext.matproj import MPRester
 from gaspy.utils import read_rc
 from gaspy import gasdb
@@ -273,8 +278,8 @@ def _make_scatter_points(dataframe, adsorbateX, adsorbateY, category, scatter_sh
             all_docs.append(doc)
         infos = [[doc_to_hovertext(doc, display_fps)] for doc in all_docs]
 
-        X = np.array(dataframe[['{}'.format(adsorbateX)]]+adsorbateX_correction)
-        Y = np.array(dataframe[['{}'.format(adsorbateY)]]+adsorbateY_correction)
+        X = np.array(dataframe[['{}'.format(adsorbateX)]]+adsorbateX_correction).reshape(-1)
+        Y = np.array(dataframe[['{}'.format(adsorbateY)]]+adsorbateY_correction).reshape(-1)
         zipped_results = list(zip(infos, X, Y))
         info, x, y = zip(*zipped_results)
 
