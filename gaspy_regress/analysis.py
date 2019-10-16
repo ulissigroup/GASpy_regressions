@@ -10,10 +10,14 @@ from collections import defaultdict
 import random
 import pickle
 import numpy as np
-from plotly import plotly
-import plotly.graph_objs as go
+from chart_studio import plotly
+import plotly.graph_objects as go
+import plotly.io as pio
 from gaspy.utils import read_rc
 from gaspy.gasdb import get_adsorption_docs
+
+# Use the old, non-blue background
+pio.templates.default = 'none'
 
 
 def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
@@ -159,6 +163,12 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
                               key=lambda kv: kv[1],
                               reverse=True)]
 
+    # Initialize the data structures we'll plot
+    Xs = np.array([])
+    Ys = np.array([])
+    energies = []
+    hovertexts = []
+
     # Figure out the spacings between each square in the grid
     traces = []
     for i, element_i in enumerate(elements_sorted):
@@ -173,36 +183,44 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
                 continue
 
             # Get all the data out of the documents
-            Xs = np.array([doc['x'] for doc in docs]) + x_offset
-            Ys = np.array([doc['y'] for doc in docs]) + y_offset
-            energies = [doc['energy'] for doc in docs]
-            hovertexts = [doc_to_hovertext(doc, hovertext_labels) for doc in docs]
+            _Xs = np.array([doc['x'] for doc in docs]) + x_offset
+            _Ys = np.array([doc['y'] for doc in docs]) + y_offset
+            _energies = [doc['energy'] for doc in docs]
+            _hovertexts = [doc_to_hovertext(doc, hovertext_labels) for doc in docs]
 
-            # Make the graphical object traces for each data set, along with
-            # all of the appropriate formatting
-            trace = go.Scattergl(x=Xs, y=Ys,
-                                 mode='markers',
-                                 marker=dict(size=marker_size,
-                                             color=energies,
-                                             colorscale=colorscale,
-                                             cmin=energy_min,
-                                             cmax=energy_max),
-                                 text=hovertexts)
-            traces.append(trace)
+            # Push the data for this elemental combination into the larger
+            # dataset
+            Xs = np.append(Xs, _Xs)
+            Ys = np.append(Ys, _Ys)
+            energies.extend(_energies)
+            hovertexts.extend(_hovertexts)
+
+    # Make the graphical object trace for each data set, along with all of the
+    # appropriate formatting
+    bimetallic_trace = go.Scattergl(x=Xs, y=Ys,
+                                    mode='markers',
+                                    marker=dict(size=marker_size,
+                                                color=energies,
+                                                colorscale=colorscale,
+                                                cmin=energy_min,
+                                                cmax=energy_max),
+                                    text=hovertexts)
 
     # Add a trace for the colorbar
-    trace = go.Scattergl(x=[0, 0], y=[0, 0],
-                         mode='markers',
-                         marker=dict(size=0.1,
-                                     color=[energy_min, energy_max],
-                                     colorscale=[(0., low_color),
-                                                 (0.5, good_color),
-                                                 (1., high_color)],
-                                     cmin=low_energy,
-                                     cmax=high_energy,
-                                     showscale=True),
-                         hoverinfo=None)
-    traces.append(trace)
+    colorbar_trace = go.Scattergl(x=[0, 0], y=[0, 0],
+                                  mode='markers',
+                                  marker=dict(size=0.1,
+                                              color=[energy_min, energy_max],
+                                              colorscale=[(0., low_color),
+                                                          (0.5, good_color),
+                                                          (1., high_color)],
+                                              cmin=low_energy,
+                                              cmax=high_energy,
+                                              showscale=True),
+                                  hoverinfo=None)
+
+    # Concatenate traces
+    traces = [bimetallic_trace, colorbar_trace]
 
     # Format the x and y axes
     axes_labels = dict(ticks='',
