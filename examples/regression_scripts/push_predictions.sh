@@ -4,16 +4,18 @@
 #SBATCH --constraint=knl
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --time=06:00:00
+#SBATCH --time=12:00:00
 #SBATCH --account=m2755
-#SBATCH --qos=low
+#SBATCH --qos=regular
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
 #SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
 #SBATCH --job-name=push
-#SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs
-#SBATCH --output=regressions.log
-#SBATCH --error=regressions.log
+#SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs/regressions
+#SBATCH --output=pushing.log
+#SBATCH --error=pushing.log
 #SBATCH --open-mode=append
+#SBATCH --mail-user=ktran@andrew.cmu.edu
+#SBATCH --mail-type=ALL
 
 shifter \
     --image=ulissigroup/gaspy_regressions:latest \
