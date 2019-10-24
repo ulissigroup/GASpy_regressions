@@ -9,7 +9,7 @@
 #SBATCH --qos=regular
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
 #SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
-#SBATCH --job-name=predict
+#SBATCH --job-name=predict_N
 #SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs/regressions
 #SBATCH --output=predict_N.log
 #SBATCH --error=predict_N.log

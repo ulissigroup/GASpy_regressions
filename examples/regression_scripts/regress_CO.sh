@@ -9,7 +9,7 @@
 #SBATCH --qos=regular
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
 #SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
-#SBATCH --job-name=regress
+#SBATCH --job-name=regress_CO
 #SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs/regressions
 #SBATCH --output=regress_CO.log
 #SBATCH --error=regress_CO.log
