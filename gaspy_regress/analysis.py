@@ -8,13 +8,13 @@ __email__ = 'ktran@andrew.cmu.edu'
 
 from collections import defaultdict
 import random
-import pickle
 import numpy as np
 from chart_studio import plotly
 import plotly.graph_objects as go
 import plotly.io as pio
 from gaspy.utils import read_rc
 from gaspy.gasdb import get_adsorption_docs
+from gaspy.atoms_operators import get_stoich_from_mpid
 
 # Use the old, non-blue background
 pio.templates.default = 'none'
@@ -50,12 +50,12 @@ def create_gridplot(adsorbate, targets, filename, hovertext_labels=None):
     extra_projections = {'atoms': '$atoms',
                          'date': '$calculation_dates.slab+adsorbate'}
     all_docs = get_adsorption_docs(adsorbate, extra_projections)
-    with open(read_rc('gasdb_path') + 'mp_comp_data.pkl', 'rb') as file_handle:
-        composition_by_mpid = pickle.load(file_handle)
+    mpids = {doc['mpid'] for doc in all_docs}
+    comps = {mpid: get_stoich_from_mpid(mpid) for mpid in mpids}
     for doc in all_docs:
-        doc['composition'] = composition_by_mpid[doc['mpid']]
+        doc['composition'] = tuple(comps[doc['mpid']].keys())
     all_elements = {element for doc in all_docs
-                    for element in composition_by_mpid[doc['mpid']]}
+                    for element in comps[doc['mpid']]}
 
     # Organize all of our documents according to their bimetallic composition
     docs_by_comp = defaultdict(list)
