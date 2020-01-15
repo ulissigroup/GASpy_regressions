@@ -8,9 +8,9 @@
 #SBATCH --account=m2755
 #SBATCH --qos=regular
 #SBATCH --image=ulissigroup/gaspy_regressions:latest
-#SBATCH --volume=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
+#SBATCH --volume=/global/cfs/cdirs/m2755/GASpy_workspaces/GASpy:/home/GASpy
 #SBATCH --job-name=predict_OOH
-#SBATCH --chdir=/global/project/projectdirs/m2755/GASpy_workspaces/GASpy/logs/regressions
+#SBATCH --chdir=/global/cfs/cdirs/m2755/GASpy_workspaces/GASpy/logs/regressions
 #SBATCH --output=predict_OOH.log
 #SBATCH --error=predict_OOH.log
 #SBATCH --open-mode=append
