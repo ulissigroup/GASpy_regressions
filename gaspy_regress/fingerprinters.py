@@ -10,13 +10,12 @@ __email__ = 'ktran@andrew.cmu.edu'
 from collections import defaultdict
 import warnings
 from abc import ABC, abstractmethod
-import pickle
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 with warnings.catch_warnings():
     warnings.filterwarnings('ignore', message='numpy.dtype size changed')
     import mendeleev
-from pymatgen.ext.matproj import MPRester
+from gaspy.atoms_operators import get_stoich_from_mpid
 from gaspy.utils import read_rc
 from gaspy.gasdb import get_catalog_docs
 
@@ -215,40 +214,10 @@ class Fingerprinter(ABC, BaseEstimator, TransformerMixin):
                                     cached and therefore may have extra
                                     key:value pairings that you may not need.
         '''
-        # Find the current cache of compositions.
-        try:
-            with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'rb') as file_handle:
-                compositions_by_mpid = pickle.load(file_handle)
-
-        # If the cache is not there, then create it
-        except FileNotFoundError:
-            compositions_by_mpid = {}
-
-            # Figure out which compositions we still need to figure out
-            catalog_docs = get_catalog_docs()
-            mpids = {doc['mpid'] for doc in self.adsorption_docs + catalog_docs}
-
-            # Each MP document may contain several MPIDs. Here we get every
-            # single document whose list of associated MPIDs matches anything
-            # in our list of missing MPIDs.
-            with MPRester(read_rc('matproj_api_key')) as rester:
-                query = {'task_ids': {'$elemMatch': {'$in': list(mpids)}}}
-                properties = ['elements', 'task_ids']
-                mp_docs = rester.query(criteria=query,
-                                       properties=properties)
-
-            # Match the MP documents to our missing MPIDs.
-            for mpid in mpids:
-                for doc in mp_docs:
-                    if mpid in set(doc['task_ids']):
-                        compositions_by_mpid[mpid] = doc['elements']
-                        break
-
-            # Save the updated cache
-            with open(CACHE_LOCATION + 'mp_comp_data.pkl', 'wb') as file_handle:
-                pickle.dump(compositions_by_mpid, file_handle)
-
-        self.compositions_by_mpid_ = compositions_by_mpid
+        catalog_docs = get_catalog_docs()
+        mpids = {doc['mpid'] for doc in self.adsorption_docs + catalog_docs}
+        stoichs = {mpid: get_stoich_from_mpid(mpid) for mpid in mpids}
+        self.compositions_by_mpid_ = {mpid: list(stoich.keys()) for mpid, stoich in stoichs.items()}
 
 
     def _get_elements_in_scope(self):
