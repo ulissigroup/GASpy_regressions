@@ -44,5 +44,5 @@ if ! squeue -u ktran | grep -E 'regress|predict|push'; then
 
     # Push to catalog
     dependencies=${dependencies#","}
-    push=$(sbatch --parsable --dependency=$dependencies /global/cfs/cdirs/m2755/GASpy/GASpy_regressions/examples/regression_scripts/push_predictions.sh)
+    push=$(sbatch --parsable --dependency=$dependencies /global/cfs/cdirs/m2755/GASpy_workspaces/GASpy/GASpy_regressions/examples/regression_scripts/push_predictions.sh)
 fi
