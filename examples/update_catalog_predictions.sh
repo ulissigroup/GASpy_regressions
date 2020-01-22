@@ -2,7 +2,7 @@
 
 
 # Only do things if we don't have a regression job already running
-if ! squeue -u ktran | grep -E 'regress|predict|push'; then
+if ! squeue -u apalizha | grep -E 'regress|predict|push'; then
 
     # Initialize the dependencies for pushing to the catalog
     dependencies=""

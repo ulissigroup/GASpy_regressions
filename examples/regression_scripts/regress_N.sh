@@ -14,7 +14,7 @@
 #SBATCH --output=regress_N.log
 #SBATCH --error=regress_N.log
 #SBATCH --open-mode=append
-#SBATCH --mail-user=ktran@andrew.cmu.edu
+#SBATCH --mail-user=apalizha@andrew.cmu.edu
 #SBATCH --mail-type=FAIL
 
 # OMP has some bug that needs this flag, now
