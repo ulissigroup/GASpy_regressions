@@ -14,7 +14,7 @@
 #SBATCH --output=pushing.log
 #SBATCH --error=pushing.log
 #SBATCH --open-mode=append
-#SBATCH --mail-user=ktran@andrew.cmu.edu
+#SBATCH --mail-user=apalizha@andrew.cmu.edu
 #SBATCH --mail-type=ALL
 
 shifter \

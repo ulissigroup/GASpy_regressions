@@ -14,7 +14,7 @@
 #SBATCH --output=predict_H.log
 #SBATCH --error=predict_H.log
 #SBATCH --open-mode=append
-#SBATCH --mail-user=ktran@andrew.cmu.edu
+#SBATCH --mail-user=apalizha@andrew.cmu.edu
 #SBATCH --mail-type=FAIL
 
 export MKL_NUM_THREADS=1
